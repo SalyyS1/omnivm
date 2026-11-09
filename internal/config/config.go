@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"time"
 )
 
@@ -53,13 +52,10 @@ type Config struct {
 	StopAfterIdle time.Duration
 
 	// NetworkBackend selects the data-plane networking mode.
-	// "auto" (default): gvproxy on darwin, tap on linux.
-	// "gvproxy": in-process gvisor-tap-vsock (compiled into vmm-worker).
-	// "tsi": TSI unconditionally (known ~32KB outbound body limit).
-	// "tap": tap + NAT (Linux).
+	// Only "tap" (tap device + NAT) is supported; "auto" resolves to it.
 	NetworkBackend string
 
-	// KernelPath is the path to the vmlinux kernel image (Linux only).
+	// KernelPath is the path to the vmlinux kernel image.
 	KernelPath string
 
 	// CloudHypervisorBin is the path to the cloud-hypervisor binary.
@@ -79,32 +75,30 @@ func DefaultConfig() *Config {
 
 	// Kernel path: prefer user-local, fall back to system package path
 	kernelPath := filepath.Join(aegisDir, "kernel", "vmlinux")
-	if runtime.GOOS == "linux" {
-		if _, err := os.Stat(kernelPath); err != nil {
-			sysKernel := "/usr/share/aegisvm/kernel/vmlinux"
-			if _, err := os.Stat(sysKernel); err == nil {
-				kernelPath = sysKernel
-			}
+	if _, err := os.Stat(kernelPath); err != nil {
+		sysKernel := "/usr/share/aegisvm/kernel/vmlinux"
+		if _, err := os.Stat(sysKernel); err == nil {
+			kernelPath = sysKernel
 		}
 	}
 
 	return &Config{
-		DataDir:            filepath.Join(aegisDir, "data"),
-		BinDir:             execDir,
-		SocketPath:         filepath.Join(aegisDir, "aegisd.sock"),
-		DefaultMemoryMB:    512,
-		DefaultVCPUs:       1,
-		RouterAddr:         "127.0.0.1:8099",
-		DBPath:             filepath.Join(aegisDir, "data", "aegis.db"),
-		ImageCacheDir:      filepath.Join(aegisDir, "data", "images"),
-		OverlaysDir:        filepath.Join(aegisDir, "data", "overlays"),
-		WorkspacesDir:      filepath.Join(aegisDir, "data", "workspaces"),
-		LogsDir:            filepath.Join(aegisDir, "data", "logs"),
-		MasterKeyPath:      filepath.Join(aegisDir, "master.key"),
-		PauseAfterIdle:     60 * time.Second,
-		StopAfterIdle:      5 * time.Minute,
-		NetworkBackend:     "auto",
-		KernelPath: kernelPath,
+		DataDir:         filepath.Join(aegisDir, "data"),
+		BinDir:          execDir,
+		SocketPath:      filepath.Join(aegisDir, "aegisd.sock"),
+		DefaultMemoryMB: 512,
+		DefaultVCPUs:    1,
+		RouterAddr:      "127.0.0.1:8099",
+		DBPath:          filepath.Join(aegisDir, "data", "aegis.db"),
+		ImageCacheDir:   filepath.Join(aegisDir, "data", "images"),
+		OverlaysDir:     filepath.Join(aegisDir, "data", "overlays"),
+		WorkspacesDir:   filepath.Join(aegisDir, "data", "workspaces"),
+		LogsDir:         filepath.Join(aegisDir, "data", "logs"),
+		MasterKeyPath:   filepath.Join(aegisDir, "master.key"),
+		PauseAfterIdle:  60 * time.Second,
+		StopAfterIdle:   5 * time.Minute,
+		NetworkBackend:  "auto",
+		KernelPath:      kernelPath,
 	}
 }
 
@@ -118,9 +112,7 @@ func (c *Config) EnsureDirs() error {
 		c.OverlaysDir,
 		c.WorkspacesDir,
 		c.LogsDir,
-	}
-	if runtime.GOOS == "linux" {
-		dirs = append(dirs, filepath.Dir(c.KernelPath))
+		filepath.Dir(c.KernelPath),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0700); err != nil {
@@ -130,33 +122,16 @@ func (c *Config) EnsureDirs() error {
 	return nil
 }
 
-// ResolveNetworkBackend resolves "auto" to a concrete backend.
-// On darwin (macOS), gvproxy is always available (compiled into vmm-worker).
-// On linux, tap + iptables NAT (Cloud Hypervisor).
+// ResolveNetworkBackend resolves "auto" (or unset) to the only supported
+// backend: tap + NAT for Cloud Hypervisor.
 func (c *Config) ResolveNetworkBackend() {
-	switch c.NetworkBackend {
-	case "gvproxy", "tsi", "tap":
-		// Explicit choice — keep as-is
-	default:
-		// "auto" or unset
-		switch runtime.GOOS {
-		case "darwin":
-			c.NetworkBackend = "gvproxy"
-		case "linux":
-			c.NetworkBackend = "tap"
-		default:
-			c.NetworkBackend = "tsi"
-		}
-	}
+	c.NetworkBackend = "tap"
 }
 
 // ResolveBinaries eagerly resolves CloudHypervisorBin and VirtiofsdBin
 // if they are empty. Called once at startup so the backend and doctor
 // share the same discovery result.
 func (c *Config) ResolveBinaries() {
-	if runtime.GOOS != "linux" {
-		return
-	}
 	if c.CloudHypervisorBin == "" {
 		c.CloudHypervisorBin = FindBinary("cloud-hypervisor", c.BinDir)
 	}
@@ -166,13 +141,12 @@ func (c *Config) ResolveBinaries() {
 }
 
 // FindBinary locates a companion binary by name. Search order:
-//  1. BinDir — directory of the running executable (dev builds, .app bundles)
-//  2. macOS .app bundle — Contents/Resources/ relative to executable
-//  3. PATH (exec.LookPath)
-//  4. Known system paths (deb/rpm installs)
+//  1. BinDir — directory of the running executable (dev builds)
+//  2. PATH (exec.LookPath)
+//  3. Known system paths (deb/rpm installs)
 //
 // BinDir is checked first so dev builds (./bin/aegisd) always find freshly
-// built siblings (./bin/aegis-gateway) instead of stale system-installed copies.
+// built siblings (./bin/aegis-harness) instead of stale system-installed copies.
 //
 // Returns the absolute path, or "" if not found.
 func FindBinary(name string, binDir string) string {
@@ -185,25 +159,13 @@ func FindBinary(name string, binDir string) string {
 		}
 	}
 
-	// 2. macOS .app bundle: if executable is in Contents/MacOS/ or
-	//    Contents/Resources/, check both locations.
-	if binDir != "" {
-		parent := filepath.Dir(binDir)
-		for _, sub := range []string{"Resources", "MacOS"} {
-			p := filepath.Join(parent, sub, name)
-			if _, err := os.Stat(p); err == nil {
-				return p
-			}
-		}
-	}
-
-	// 3. PATH
+	// 2. PATH
 	if p, err := exec.LookPath(name); err == nil {
 		return p
 	}
 
-	// 4. Known system paths
-	for _, dir := range []string{"/usr/lib/aegisvm", "/usr/libexec", "/usr/local/bin", "/opt/homebrew/bin"} {
+	// 3. Known system paths
+	for _, dir := range []string{"/usr/lib/aegisvm", "/usr/libexec", "/usr/local/bin"} {
 		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
 			return p

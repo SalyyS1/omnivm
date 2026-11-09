@@ -99,7 +99,6 @@ func (d *DB) migrate() error {
 		`ALTER TABLE instances ADD COLUMN stopped_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE instances ADD COLUMN kit TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN auto_workspace INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range migrations {

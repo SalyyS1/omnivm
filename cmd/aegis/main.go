@@ -18,10 +18,8 @@
 //	aegis secret set           Set a secret
 //	aegis secret list          List secrets
 //	aegis secret delete        Delete a secret
-//	aegis kit list             List installed kits
 //	aegis mcp install          Register aegis-mcp in Claude Code
 //	aegis mcp uninstall        Remove aegis-mcp from Claude Code
-//	aegis ui                   Start web management UI
 //	aegis status               Show daemon status
 //	aegis doctor               Print platform and backend info
 package main
@@ -47,7 +45,6 @@ import (
 	"time"
 
 	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/kit"
 	"github.com/xfeldman/aegisvm/internal/version"
 )
 
@@ -76,12 +73,8 @@ func main() {
 		cmdLogs()
 	case "secret":
 		cmdSecret()
-	case "kit":
-		cmdKit()
 	case "mcp":
 		cmdMCP()
-	case "ui":
-		cmdUI()
 	case "version", "--version", "-v":
 		fmt.Printf("aegis %s\n", version.Version())
 	case "help", "--help", "-h":
@@ -106,9 +99,7 @@ Commands:
   exec       Execute a command in a running instance
   logs       Stream instance logs
   secret     Manage secrets (set, list, delete)
-  kit        Manage kits (list)
   mcp        MCP server management (install)
-  ui         Start web management UI
 
 Examples:
   aegis up
@@ -221,9 +212,9 @@ func startDaemon() {
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	// Own process group so SIGINT from terminal (Ctrl-C on "aegis ui")
+	// Own process group so SIGINT from the terminal
 	// doesn't kill the daemon. aegisd handles its own shutdown via SIGTERM
-	// from "aegis down", and calls StopAll() to kill child daemons (gateways).
+	// from "aegis down".
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -278,8 +269,6 @@ func showLogTail(path string, n int) {
 	}
 }
 
-// daemonPidFilePath returns the PID file path for a daemon binary name.
-// e.g. "aegis-gateway" → ~/.aegis/data/gateway.pid
 func cmdDown() {
 	data, err := os.ReadFile(pidFilePath())
 	if err != nil {
@@ -309,8 +298,8 @@ func cmdDown() {
 		return
 	}
 
-	// Send SIGTERM to aegisd. Its shutdown handler calls StopAll() to kill
-	// child daemons (gateways). We don't use process group kill because
+	// Send SIGTERM to aegisd, which stops its VMs on shutdown.
+	// We don't use process group kill because
 	// Setpgid may not take effect on all platforms, and killing the wrong
 	// group could take down the user's session.
 	err = proc.Signal(syscall.SIGTERM)
@@ -347,8 +336,8 @@ type exposeFlag struct {
 	Protocol   string // "http", "tcp", etc. Default: "http"
 }
 
-// parseRunFlags parses common flags: --name, --secret, --image, --workspace, --kit
-func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, kitName string, command []string) {
+// parseRunFlags parses common flags: --name, --secret, --image, --workspace
+func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, command []string) {
 	envVars = make(map[string]string)
 
 	for i := 0; i < len(args); i++ {
@@ -384,13 +373,6 @@ func parseRunFlags(args []string) (name, imageRef string, envVars map[string]str
 				os.Exit(1)
 			}
 			workspace = args[i+1]
-			i++
-		case "--kit":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "--kit requires a kit name")
-				os.Exit(1)
-			}
-			kitName = args[i+1]
 			i++
 		}
 	}
@@ -445,21 +427,10 @@ func parseExposeArg(arg string) exposeFlag {
 func cmdRun() {
 	args := os.Args[2:]
 
-	name, imageRef, envVars, secretKeys, workspace, kitName, command := parseRunFlags(args)
-
-	// Apply kit defaults if --kit specified
-	if kitName != "" {
-		manifest := loadKitManifestOrDie(kitName)
-		if imageRef == "" && manifest.Image.Base != "" {
-			imageRef = manifest.Image.Base
-		}
-		if len(command) == 0 && len(manifest.Defaults.Command) > 0 {
-			command = manifest.Defaults.Command
-		}
-	}
+	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
 
 	if len(command) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: aegis run [--name NAME] [--secret KEY] [--image IMAGE] [--kit KIT] -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "usage: aegis run [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
 		os.Exit(1)
 	}
 
@@ -498,16 +469,6 @@ func cmdRun() {
 	}
 	if len(secretKeys) > 0 {
 		reqBody["secrets"] = secretKeys
-	}
-	if kitName != "" {
-		reqBody["kit"] = kitName
-		// Apply kit capabilities as defaults
-		manifest := loadKitManifestOrDie(kitName)
-		if manifest.Defaults.Capabilities != nil {
-			var caps interface{}
-			json.Unmarshal(*manifest.Defaults.Capabilities, &caps)
-			reqBody["capabilities"] = caps
-		}
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)
@@ -639,24 +600,13 @@ func cmdDoctor() {
 	fmt.Println()
 
 	// Platform-specific dependency checks
-	switch runtime.GOOS {
-	case "darwin":
-		doctorDarwin()
-	case "linux":
-		doctorLinux()
-	}
+	doctorLinux()
 
 	// Common tools
 	if _, err := exec.LookPath("mkfs.ext4"); err == nil {
 		fmt.Printf("e2fsprogs:          found\n")
 	} else {
-		hint := ""
-		if runtime.GOOS == "darwin" {
-			hint = " (install via: brew install e2fsprogs)"
-		} else {
-			hint = " (install via: apt install e2fsprogs)"
-		}
-		fmt.Printf("e2fsprogs:          not found%s\n", hint)
+		fmt.Printf("e2fsprogs:          not found (install via: apt install e2fsprogs)\n")
 	}
 
 	fmt.Println()
@@ -685,47 +635,6 @@ func cmdDoctor() {
 		}
 	} else {
 		fmt.Printf("aegisd:             not running\n")
-	}
-}
-
-func doctorDarwin() {
-	// libkrun
-	libPaths := []string{
-		"/opt/homebrew/lib/libkrun.dylib",
-		"/usr/local/lib/libkrun.dylib",
-	}
-	libFound := false
-	for _, p := range libPaths {
-		if _, err := os.Stat(p); err == nil {
-			fmt.Printf("libkrun:            found at %s\n", p)
-			libFound = true
-			break
-		}
-	}
-	if !libFound {
-		fmt.Printf("libkrun:            not found\n")
-	}
-
-	// vmm-worker
-	home, _ := os.UserHomeDir()
-	workerPaths := []string{
-		filepath.Join(home, ".aegis", "bin", "aegis-vmm-worker"),
-		"aegis-vmm-worker",
-	}
-	workerFound := false
-	for _, p := range workerPaths {
-		if _, err := os.Stat(p); err == nil {
-			fmt.Printf("vmm-worker:         found at %s\n", p)
-			workerFound = true
-			break
-		}
-	}
-	if !workerFound {
-		if _, err := exec.LookPath("aegis-vmm-worker"); err == nil {
-			fmt.Printf("vmm-worker:         found in PATH\n")
-		} else {
-			fmt.Printf("vmm-worker:         not found\n")
-		}
 	}
 }
 
@@ -862,24 +771,10 @@ Examples:
 func cmdInstanceStart(client *http.Client) {
 	args := os.Args[3:]
 
-	name, imageRef, envVars, secretKeys, workspace, kitName, command := parseRunFlags(args)
-
-	// Restart path: --name only, no command, no kit → just restart stored config
-	isRestart := name != "" && len(command) == 0 && kitName == ""
-
-	// Apply kit defaults only on create (not restart)
-	if kitName != "" && !isRestart {
-		manifest := loadKitManifestOrDie(kitName)
-		if imageRef == "" && manifest.Image.Base != "" {
-			imageRef = manifest.Image.Base
-		}
-		if len(command) == 0 && len(manifest.Defaults.Command) > 0 {
-			command = manifest.Defaults.Command
-		}
-	}
+	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
 
 	if len(command) == 0 && name == "" {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance start [--name NAME] [--secret KEY] [--image IMAGE] [--kit KIT] -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "usage: aegis instance start [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
 		fmt.Fprintln(os.Stderr, "       aegis instance start --name NAME   (restart stopped instance)")
 		os.Exit(1)
 	}
@@ -907,16 +802,6 @@ func cmdInstanceStart(client *http.Client) {
 	}
 	if workspace != "" {
 		reqBody["workspace"] = workspace
-	}
-	if kitName != "" && !isRestart {
-		reqBody["kit"] = kitName
-		// Apply kit capabilities as defaults
-		manifest := loadKitManifestOrDie(kitName)
-		if manifest.Defaults.Capabilities != nil {
-			var caps interface{}
-			json.Unmarshal(*manifest.Defaults.Capabilities, &caps)
-			reqBody["capabilities"] = caps
-		}
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)
@@ -990,19 +875,15 @@ func cmdInstanceList(client *http.Client) {
 		return
 	}
 
-	fmt.Printf("%-30s %-15s %-10s %-12s %-10s %-20s\n", "ID", "HANDLE", "KIT", "STATUS", "STATE", "STOPPED AT")
+	fmt.Printf("%-30s %-15s %-12s %-10s %-20s\n", "ID", "HANDLE", "STATUS", "STATE", "STOPPED AT")
 	for _, inst := range instances {
 		id, _ := inst["id"].(string)
 		state, _ := inst["state"].(string)
 		handle, _ := inst["handle"].(string)
-		kitName, _ := inst["kit"].(string)
 		stoppedAt, _ := inst["stopped_at"].(string)
 		enabled, _ := inst["enabled"].(bool)
 		if handle == "" {
 			handle = "-"
-		}
-		if kitName == "" {
-			kitName = "-"
 		}
 		if stoppedAt == "" {
 			stoppedAt = "-"
@@ -1032,7 +913,7 @@ func cmdInstanceList(client *http.Client) {
 		}
 		statePad := 10 + len(stateStr) - len(state)
 
-		fmt.Printf("%-30s %-15s %-10s %-*s %-*s %-20s\n", id, handle, kitName, statusPad, statusStr, statePad, stateStr, stoppedAt)
+		fmt.Printf("%-30s %-15s %-*s %-*s %-20s\n", id, handle, statusPad, statusStr, statePad, stateStr, stoppedAt)
 	}
 }
 
@@ -1097,23 +978,6 @@ func cmdInstanceInfo(client *http.Client) {
 	fmt.Printf("Enabled:     %s\n", enabledStr)
 	if imageRef, ok := inst["image_ref"].(string); ok && imageRef != "" {
 		fmt.Printf("Image:       %s\n", imageRef)
-	}
-	if kitVal, ok := inst["kit"].(string); ok && kitVal != "" {
-		kitDisplay := kitVal
-		// Check if kit manifest is still installed
-		home, _ := os.UserHomeDir()
-		kitPath := filepath.Join(home, ".aegis", "kits", kitVal+".json")
-		if _, err := os.Stat(kitPath); err != nil {
-			kitDisplay += " (not installed)"
-		}
-		fmt.Printf("Kit:         %s\n", kitDisplay)
-		if gwRunning, ok := inst["gateway_running"].(bool); ok {
-			if gwRunning {
-				fmt.Printf("Gateway:     %srunning%s\n", colorGreen, colorReset)
-			} else {
-				fmt.Printf("Gateway:     %sstopped%s\n", colorGray, colorReset)
-			}
-		}
 	}
 	if cmd, ok := inst["command"].([]interface{}); ok && len(cmd) > 0 {
 		parts := make([]string, len(cmd))
@@ -1848,101 +1712,9 @@ func cmdMCPUninstall() {
 	fmt.Println("aegis MCP server removed from Claude Code")
 }
 
-// --- Kit ---
-
-// cmdKit dispatches kit subcommands.
-func cmdKit() {
-	if len(os.Args) < 3 {
-		fmt.Println(`Usage: aegis kit <command>
-
-Commands:
-  list    List installed kits`)
-		os.Exit(1)
-	}
-
-	switch os.Args[2] {
-	case "list":
-		cmdKitList()
-	case "help", "--help", "-h":
-		fmt.Println(`Usage: aegis kit <command>
-
-Commands:
-  list    List installed kits`)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown kit command: %s\n", os.Args[2])
-		os.Exit(1)
-	}
-}
-
-func cmdKitList() {
-	manifests, _ := kit.ListManifests()
-	if len(manifests) == 0 {
-		fmt.Println("No kits installed.")
-		return
-	}
-
-	// Find the bin directory (next to our own binary)
-	exe, _ := os.Executable()
-	binDir := filepath.Dir(exe)
-
-	fmt.Printf("%-12s %-10s %-10s %s\n", "NAME", "VERSION", "STATUS", "DESCRIPTION")
-	for _, m := range manifests {
-		missing := kit.ValidateManifest(m, binDir)
-		status := colorGreen + "ok" + colorReset
-		desc := m.Description
-		if len(missing) > 0 {
-			status = colorRed + "broken" + colorReset
-			desc = fmt.Sprintf("%s (missing: %s)", m.Description, strings.Join(missing, ", "))
-		}
-
-		name := m.Name
-		fmt.Printf("%-12s %-10s %-*s %s\n", name, m.Version,
-			10+len(status)-len("ok"), status, desc)
-	}
-}
-
-// loadKitManifestOrDie loads a kit manifest or exits with an error.
-func loadKitManifestOrDie(name string) *kitManifest {
-	m, err := kit.LoadManifest(name)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "kit %q: %v\n", name, err)
-		os.Exit(1)
-	}
-	// Convert to CLI's kitManifest type
-	var cm kitManifest
-	cm.Name = m.Name
-	cm.Version = m.Version
-	cm.Description = m.Description
-	for _, d := range m.InstanceDaemons {
-		cm.InstanceDaemons = append(cm.InstanceDaemons, d.Binary)
-	}
-	cm.Image.Base = m.Image.Base
-	cm.Image.Inject = m.Image.Inject
-	cm.Defaults.Command = m.Defaults.Command
-	cm.Defaults.Capabilities = m.Defaults.Capabilities
-	return &cm
-}
-
-// kitManifest mirrors the kit manifest structure for CLI use.
-type kitManifest struct {
-	Name            string   `json:"name"`
-	Version         string   `json:"version"`
-	Description     string   `json:"description"`
-	InstanceDaemons []string `json:"instance_daemons"`
-	Image           struct {
-		Base   string   `json:"base"`
-		Inject []string `json:"inject"`
-	} `json:"image"`
-	Defaults struct {
-		Command      []string         `json:"command"`
-		Capabilities *json.RawMessage `json:"capabilities"`
-	} `json:"defaults"`
-}
-
 // --- Default image ---
 //
 // When no --image is specified, the CLI defaults to defaultImage.
 // aegisd's OCI pull/cache mechanism handles the rest.
 
 const defaultImage = "python:3.12-alpine"
-

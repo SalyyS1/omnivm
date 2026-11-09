@@ -15,7 +15,7 @@ import (
 )
 
 // Network tests: verify egress (VM→internet), ingress (client→VM),
-// and large payloads that would fail under TSI's ~32KB limit.
+// and large payloads.
 
 // TestNetwork_BackendInStatus verifies the network_backend field is exposed
 // in the /v1/status API response.
@@ -29,15 +29,14 @@ func TestNetwork_BackendInStatus(t *testing.T) {
 	if !ok || backend == "" {
 		t.Fatalf("network_backend not in capabilities: %v", caps)
 	}
-	if backend != "gvproxy" && backend != "tsi" {
-		t.Fatalf("unexpected network_backend: %q (want gvproxy or tsi)", backend)
+	if backend != "tap" {
+		t.Fatalf("unexpected network_backend: %q (want tap)", backend)
 	}
 	t.Logf("network backend: %s", backend)
 }
 
 // TestNetwork_DNSResolution verifies DNS works from inside the VM.
-// In gvproxy mode, DNS is served by gvproxy at the gateway (192.168.127.1).
-// In TSI mode, DNS goes through 8.8.8.8 via TSI.
+// DNS goes to the resolver passed on the kernel command line.
 func TestNetwork_DNSResolution(t *testing.T) {
 	// Use nslookup from busybox to test DNS resolution
 	out := aegisRun(t, "run", "--", "sh", "-c",
@@ -57,7 +56,7 @@ func TestNetwork_EgressHTTP(t *testing.T) {
 }
 
 // TestNetwork_EgressHTTPS verifies the VM can make outbound HTTPS requests.
-// This validates TLS through the network stack (gvproxy or TSI).
+// This validates TLS through the tap + NAT network path.
 func TestNetwork_EgressHTTPS(t *testing.T) {
 	out := aegisRun(t, "run", "--", "sh", "-c",
 		"wget -q -O /dev/null -T 10 https://example.com && echo HTTPS_OK || echo HTTPS_FAIL")
@@ -67,11 +66,11 @@ func TestNetwork_EgressHTTPS(t *testing.T) {
 }
 
 // TestNetwork_EgressLargePost verifies outbound POST with a 50KB body.
-// This is the key test — TSI fails at ~32KB, gvproxy should handle it fine.
+// Large request bodies must pass through the tap + NAT path intact.
 func TestNetwork_EgressLargePost(t *testing.T) {
 	// httpbin.org/post echoes the body back, but we just need a 200.
 	// Use a simple python script to send a large POST and report the status.
-	// The body is 50000 bytes of 'A', well above the TSI ~32KB limit.
+	// The body is 50000 bytes of 'A'.
 	script := `
 import urllib.request
 import sys
@@ -92,7 +91,7 @@ except Exception as e:
 `
 	out := aegisRun(t, "run", "--", "python3", "-c", script)
 	if !strings.Contains(out, "POST_STATUS=200") {
-		t.Fatalf("50KB POST failed (TSI limit?): %s", out)
+		t.Fatalf("50KB POST failed: %s", out)
 	}
 	t.Log("50KB outbound POST succeeded")
 }
@@ -199,9 +198,7 @@ http.server.HTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
 }
 
 // TestNetwork_IngressLargePayload verifies a 50KB HTTP request body can be
-// received by a guest server through the router. This tests ingress path with
-// a payload larger than the TSI egress limit (ingress was always fine, but
-// verifies gvproxy handles it correctly in both directions).
+// received by a guest server through the router.
 func TestNetwork_IngressLargePayload(t *testing.T) {
 	const (
 		publicPort = 8183
@@ -348,7 +345,7 @@ if fail_count > 0:
 }
 
 // TestNetwork_IngressConcurrent sends multiple simultaneous requests to a
-// guest server through the router to verify gvproxy handles concurrent
+// guest server through the router to verify the network path handles concurrent
 // ingress connections.
 func TestNetwork_IngressConcurrent(t *testing.T) {
 	const (

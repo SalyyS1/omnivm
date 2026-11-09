@@ -19,7 +19,6 @@ import (
 
 	"github.com/xfeldman/aegisvm/internal/api"
 	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/daemon"
 	"github.com/xfeldman/aegisvm/internal/image"
 	"github.com/xfeldman/aegisvm/internal/lifecycle"
 	"github.com/xfeldman/aegisvm/internal/logstore"
@@ -46,7 +45,7 @@ func main() {
 
 	log.Printf("aegisd starting on %s/%s (backend: %s)", platform.OS, platform.Arch, platform.Backend)
 
-	// Resolve network backend (auto → gvproxy on darwin, tap on linux)
+	// Resolve network backend
 	cfg.ResolveNetworkBackend()
 	cfg.ResolveBinaries()
 	log.Printf("network backend: %s", cfg.NetworkBackend)
@@ -54,11 +53,6 @@ func main() {
 	// Initialize VMM backend
 	var backend vmm.VMM
 	switch platform.Backend {
-	case "libkrun":
-		backend, err = vmm.NewLibkrunVMM(cfg)
-		if err != nil {
-			log.Fatalf("init libkrun backend: %v", err)
-		}
 	case "cloud-hypervisor":
 		backend, err = vmm.NewCloudHypervisorVMM(cfg)
 		if err != nil {
@@ -227,9 +221,6 @@ func main() {
 		inst.SetBootEnv(env)
 	})
 
-	// Create daemon manager for per-instance sidecar processes (e.g., gateways)
-	dm := daemon.NewManager(cfg.BinDir, cfg.DataDir, cfg.SocketPath)
-
 	// Restore instances from registry (they all come back as stopped — VMs are gone)
 	if instances, err := reg.ListInstances(); err == nil && len(instances) > 0 {
 		restored := 0
@@ -273,9 +264,6 @@ func main() {
 					opts = append(opts, lifecycle.WithCapabilities(&caps))
 				}
 			}
-			if ri.Kit != "" {
-				opts = append(opts, lifecycle.WithKit(ri.Kit))
-			}
 
 			// Re-create in lifecycle manager (state = stopped)
 			inst := lm.CreateInstance(ri.ID, ri.Command, exposePorts, opts...)
@@ -291,48 +279,13 @@ func main() {
 			// Port allocation is handled by OnAllocatePorts (triggered by
 			// CreateInstance above) which reads persisted ports from the registry.
 
-			// Start instance daemons for enabled kit instances
-			if ri.Enabled && ri.Kit != "" {
-				handle := ri.Handle
-				if handle == "" {
-					handle = ri.ID
-				}
-				// Resolve secrets for daemon env
-				daemonEnv := make(map[string]string)
-				if len(inst.SecretKeys) > 0 {
-					injectAll := len(inst.SecretKeys) == 1 && inst.SecretKeys[0] == "*"
-					var allowlist map[string]bool
-					if !injectAll {
-						allowlist = make(map[string]bool, len(inst.SecretKeys))
-						for _, k := range inst.SecretKeys {
-							allowlist[k] = true
-						}
-					}
-					secs, _ := reg.ListSecrets()
-					for _, sec := range secs {
-						if injectAll || allowlist[sec.Name] {
-							val, err := ss.DecryptString(sec.EncryptedValue)
-							if err == nil {
-								daemonEnv[sec.Name] = val
-							}
-						}
-					}
-				}
-				for k, v := range inst.Env {
-					daemonEnv[k] = v
-				}
-				if err := dm.StartDaemons(ri.ID, handle, ri.Kit, daemonEnv); err != nil {
-					log.Printf("start daemons for %s: %v", ri.ID, err)
-				}
-			}
-
 			restored++
 		}
 		log.Printf("restored %d instance(s) from registry (all stopped)", restored)
 	}
 
 	// Start API server
-	server := api.NewServer(cfg, backend, lm, reg, ss, ls, rtr, dm)
+	server := api.NewServer(cfg, backend, lm, reg, ss, ls, rtr)
 	if err := server.Start(); err != nil {
 		log.Fatalf("start API server: %v", err)
 	}
@@ -356,9 +309,6 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
-	// Stop all instance daemons (gateways, etc.)
-	dm.StopAll()
 
 	// Stop lifecycle manager (stops all VMs)
 	lm.Shutdown()

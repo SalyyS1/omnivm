@@ -18,8 +18,6 @@ import (
 
 	"github.com/xfeldman/aegisvm/internal/blob"
 	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/daemon"
-	"github.com/xfeldman/aegisvm/internal/kit"
 	"github.com/xfeldman/aegisvm/internal/lifecycle"
 	"github.com/xfeldman/aegisvm/internal/logstore"
 	"github.com/xfeldman/aegisvm/internal/registry"
@@ -39,14 +37,13 @@ type Server struct {
 	secretStore *secrets.Store
 	logStore    *logstore.Store
 	router      *router.Router
-	daemons     *daemon.Manager
 	mux         *http.ServeMux
 	server      *http.Server
 	ln          net.Listener
 }
 
 // NewServer creates a new API server.
-func NewServer(cfg *config.Config, v vmm.VMM, lm *lifecycle.Manager, reg *registry.DB, ss *secrets.Store, ls *logstore.Store, rtr *router.Router, dm *daemon.Manager) *Server {
+func NewServer(cfg *config.Config, v vmm.VMM, lm *lifecycle.Manager, reg *registry.DB, ss *secrets.Store, ls *logstore.Store, rtr *router.Router) *Server {
 	s := &Server{
 		cfg:         cfg,
 		vmm:         v,
@@ -55,7 +52,6 @@ func NewServer(cfg *config.Config, v vmm.VMM, lm *lifecycle.Manager, reg *regist
 		secretStore: ss,
 		logStore:    ls,
 		router:      rtr,
-		daemons:     dm,
 		mux:         http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -87,11 +83,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/instances/{id}/workspace", s.handleWorkspaceWrite)
 	s.mux.HandleFunc("POST /v1/instances/{id}/blob", s.handleBlobUpload)
 
-	// Kit config file access (host-side, ~/.aegis/kits/{handle}/)
-	s.mux.HandleFunc("GET /v1/instances/{id}/kit-config", s.handleKitConfigRead)
-	s.mux.HandleFunc("POST /v1/instances/{id}/kit-config", s.handleKitConfigWrite)
-
-	// Tether routes (Agent Kit messaging)
+	// Tether routes (host-guest messaging)
 	s.mux.HandleFunc("POST /v1/instances/{id}/tether", s.handleTetherIngress)
 	s.mux.HandleFunc("GET /v1/instances/{id}/tether/stream", s.handleTetherStream)
 	s.mux.HandleFunc("GET /v1/instances/{id}/tether/poll", s.handleTetherPoll)
@@ -103,9 +95,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/secrets", s.handleListSecrets)
 	s.mux.HandleFunc("GET /v1/secrets/{name}", s.handleGetSecret)
 	s.mux.HandleFunc("DELETE /v1/secrets/{name}", s.handleDeleteSecret)
-
-	// Kits
-	s.mux.HandleFunc("GET /v1/kits", s.handleListKits)
 
 	// Status
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
@@ -167,118 +156,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleListKits(w http.ResponseWriter, r *http.Request) {
-	manifests, err := kit.ListManifests()
-	if err != nil {
-		manifests = nil
-	}
-	result := make([]map[string]interface{}, 0, len(manifests))
-	for _, m := range manifests {
-		entry := map[string]interface{}{
-			"name": m.Name,
-		}
-		if m.Version != "" {
-			entry["version"] = m.Version
-		}
-		if m.Description != "" {
-			entry["description"] = m.Description
-		}
-		if m.Image.Base != "" {
-			entry["image"] = m.Image.Base
-		}
-		if len(m.Defaults.Command) > 0 {
-			entry["defaults"] = map[string]interface{}{
-				"command": m.Defaults.Command,
-			}
-		}
-		// Flatten daemon configs (host) first, then kit-level configs (workspace).
-		var cfgs []map[string]interface{}
-		for _, d := range m.InstanceDaemons {
-			if d.Config != nil {
-				cfg := map[string]interface{}{
-					"path":     d.Config.Path,
-					"location": "host",
-				}
-				if d.Config.Label != "" {
-					cfg["label"] = d.Config.Label
-				}
-				if d.Config.Default != nil {
-					cfg["default"] = json.RawMessage(d.Config.Default)
-				}
-				cfgs = append(cfgs, cfg)
-			}
-		}
-		for _, c := range m.Config {
-			cfg := map[string]interface{}{
-				"path":     c.Path,
-				"location": "workspace",
-			}
-			if c.Label != "" {
-				cfg["label"] = c.Label
-			}
-			if c.Default != nil {
-				cfg["default"] = json.RawMessage(c.Default)
-			}
-			cfgs = append(cfgs, cfg)
-		}
-		if len(cfgs) > 0 {
-			entry["config"] = cfgs
-		}
-		// Extract env vars referenced by configs (any *_env field value)
-		if envRefs := extractReferencedEnv(m); len(envRefs) > 0 {
-			entry["referenced_env"] = envRefs
-		}
-		result = append(result, entry)
-	}
-	writeJSON(w, http.StatusOK, result)
-}
-
-// extractReferencedEnv scans all config defaults in a kit manifest for fields
-// ending in "_env" and returns the unique string values. This tells callers
-// (MCP, UI) which env vars the kit's configs expect.
-func extractReferencedEnv(m *kit.Manifest) []string {
-	seen := make(map[string]bool)
-	var result []string
-
-	collect := func(raw json.RawMessage) {
-		if raw == nil {
-			return
-		}
-		scanEnvFields(raw, seen, &result)
-	}
-
-	for _, c := range m.Config {
-		collect(c.Default)
-	}
-	for _, d := range m.InstanceDaemons {
-		if d.Config != nil {
-			collect(d.Config.Default)
-		}
-	}
-	return result
-}
-
-// scanEnvFields recursively scans a JSON value for keys ending in "_env"
-// and collects their string values.
-func scanEnvFields(raw json.RawMessage, seen map[string]bool, result *[]string) {
-	var obj map[string]json.RawMessage
-	if json.Unmarshal(raw, &obj) != nil {
-		return
-	}
-	for key, val := range obj {
-		if strings.HasSuffix(key, "_env") {
-			var s string
-			if json.Unmarshal(val, &s) == nil && s != "" && !seen[s] {
-				seen[s] = true
-				*result = append(*result, s)
-			}
-		} else {
-			// Recurse into nested objects
-			scanEnvFields(val, seen, result)
-		}
-	}
-}
-
 // Instance API types
 
 type exposeRequest struct {
@@ -288,17 +165,16 @@ type exposeRequest struct {
 }
 
 type createInstanceRequest struct {
-	ImageRef  string            `json:"image_ref,omitempty"`
-	Command   []string          `json:"command"`
-	Env       map[string]string `json:"env,omitempty"`
-	Secrets   []string          `json:"secrets,omitempty"` // [] = none, ["*"] = all, ["KEY1","KEY2"] = allowlist
-	Handle    string            `json:"handle,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	MemoryMB   int               `json:"memory_mb,omitempty"`
-	VCPUs      int               `json:"vcpus,omitempty"`
-	IdlePolicy   string                   `json:"idle_policy,omitempty"`
+	ImageRef     string                     `json:"image_ref,omitempty"`
+	Command      []string                   `json:"command"`
+	Env          map[string]string          `json:"env,omitempty"`
+	Secrets      []string                   `json:"secrets,omitempty"` // [] = none, ["*"] = all, ["KEY1","KEY2"] = allowlist
+	Handle       string                     `json:"handle,omitempty"`
+	Workspace    string                     `json:"workspace,omitempty"`
+	MemoryMB     int                        `json:"memory_mb,omitempty"`
+	VCPUs        int                        `json:"vcpus,omitempty"`
+	IdlePolicy   string                     `json:"idle_policy,omitempty"`
 	Capabilities *lifecycle.CapabilityToken `json:"capabilities,omitempty"` // guest orchestration capabilities
-	Kit          string                    `json:"kit,omitempty"`
 }
 
 const defaultImage = "python:3.12-alpine"
@@ -382,31 +258,11 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	if req.Capabilities != nil {
 		opts = append(opts, lifecycle.WithCapabilities(req.Capabilities))
 	}
-	if req.Kit != "" {
-		opts = append(opts, lifecycle.WithKit(req.Kit))
-	}
-
-	// Write default kit configs if they don't exist yet
-	if req.Kit != "" {
-		s.writeDefaultKitConfigs(req.Kit, req.Workspace, req.Handle, id)
-	}
 
 	// Create in lifecycle manager.
 	// This triggers onInstanceCreated which handles router port allocation
 	// and registry persistence — same path as guest API spawns.
 	s.lifecycle.CreateInstance(id, req.Command, nil, opts...)
-
-	// Start instance daemons (e.g., gateway) if kit has instance_daemons
-	if req.Kit != "" && s.daemons != nil {
-		handle := req.Handle
-		if handle == "" {
-			handle = id
-		}
-		daemonEnv := s.resolveEnv(req.Secrets, req.Env)
-		if err := s.daemons.StartDaemons(id, handle, req.Kit, daemonEnv); err != nil {
-			log.Printf("instance %s start daemons: %v", id, err)
-		}
-	}
 
 	// Boot the instance
 	go func() {
@@ -428,9 +284,6 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	if req.ImageRef != "" {
 		resp["image_ref"] = req.ImageRef
 	}
-	if req.Kit != "" {
-		resp["kit"] = req.Kit
-	}
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -451,18 +304,6 @@ func (s *Server) handleRestartOrConflict(w http.ResponseWriter, inst *lifecycle.
 	}
 
 	s.ensurePortListeners(inst)
-
-	// Start instance daemons on re-enable
-	if inst.Kit != "" && s.daemons != nil {
-		handle := inst.HandleAlias
-		if handle == "" {
-			handle = inst.ID
-		}
-		daemonEnv := s.resolveEnv(inst.SecretKeys, inst.Env)
-		if err := s.daemons.StartDaemons(inst.ID, handle, inst.Kit, daemonEnv); err != nil {
-			log.Printf("instance %s start daemons: %v", inst.ID, err)
-		}
-	}
 
 	// Re-enable and boot via StartInstance (sets Enabled=true + boots).
 	go func() {
@@ -503,12 +344,12 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"id":                inst.ID,
-		"state":             inst.State,
-		"enabled":           inst.Enabled,
-		"command":           inst.Command,
-		"created_at":        inst.CreatedAt.Format(time.RFC3339),
-		"last_active_at":    s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
+		"id":                 inst.ID,
+		"state":              inst.State,
+		"enabled":            inst.Enabled,
+		"command":            inst.Command,
+		"created_at":         inst.CreatedAt.Format(time.RFC3339),
+		"last_active_at":     s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
 		"active_connections": s.lifecycle.ActiveConns(inst.ID),
 	}
 
@@ -517,15 +358,6 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	if inst.ImageRef != "" {
 		resp["image_ref"] = inst.ImageRef
-	}
-	if inst.Kit != "" {
-		resp["kit"] = inst.Kit
-		if m, err := kit.LoadManifest(inst.Kit); err == nil && m.Version != "" {
-			resp["kit_version"] = m.Version
-		}
-		if s.daemons != nil {
-			resp["gateway_running"] = s.daemons.IsRunning(inst.ID)
-		}
 	}
 	if inst.HarnessVersion != "" {
 		resp["harness_version"] = inst.HarnessVersion
@@ -620,13 +452,13 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entry := map[string]interface{}{
-			"id":                inst.ID,
-			"state":             inst.State,
-			"enabled":           inst.Enabled,
-			"command":           inst.Command,
-			"created_at":        inst.CreatedAt.Format(time.RFC3339),
-			"updated_at":        inst.UpdatedAt.Format(time.RFC3339),
-			"last_active_at":    s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
+			"id":                 inst.ID,
+			"state":              inst.State,
+			"enabled":            inst.Enabled,
+			"command":            inst.Command,
+			"created_at":         inst.CreatedAt.Format(time.RFC3339),
+			"updated_at":         inst.UpdatedAt.Format(time.RFC3339),
+			"last_active_at":     s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
 			"active_connections": s.lifecycle.ActiveConns(inst.ID),
 		}
 		if inst.HandleAlias != "" {
@@ -634,9 +466,6 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		if inst.ImageRef != "" {
 			entry["image_ref"] = inst.ImageRef
-		}
-		if inst.Kit != "" {
-			entry["kit"] = inst.Kit
 		}
 		if !inst.StoppedAt.IsZero() {
 			entry["stopped_at"] = inst.StoppedAt.Format(time.RFC3339)
@@ -945,18 +774,6 @@ func (s *Server) handleStartInstance(w http.ResponseWriter, r *http.Request) {
 
 	s.ensurePortListeners(inst)
 
-	// Start instance daemons if kit instance and not already running
-	if inst.Kit != "" && s.daemons != nil {
-		handle := inst.HandleAlias
-		if handle == "" {
-			handle = inst.ID
-		}
-		daemonEnv := s.resolveEnv(inst.SecretKeys, inst.Env)
-		if err := s.daemons.StartDaemons(inst.ID, handle, inst.Kit, daemonEnv); err != nil {
-			log.Printf("instance %s start daemons: %v", inst.ID, err)
-		}
-	}
-
 	// StartInstance sets Enabled=true and boots
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -992,18 +809,6 @@ func (s *Server) handleRestartInstance(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.ensurePortListeners(inst)
-
-	// Start instance daemons if kit instance
-	if inst.Kit != "" && s.daemons != nil {
-		handle := inst.HandleAlias
-		if handle == "" {
-			handle = inst.ID
-		}
-		daemonEnv := s.resolveEnv(inst.SecretKeys, inst.Env)
-		if err := s.daemons.StartDaemons(inst.ID, handle, inst.Kit, daemonEnv); err != nil {
-			log.Printf("instance %s start daemons: %v", inst.ID, err)
-		}
-	}
 
 	// Re-enable and boot
 	go func() {
@@ -1070,11 +875,6 @@ func (s *Server) handleDisableInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop instance daemons
-	if s.daemons != nil {
-		s.daemons.StopDaemons(inst.ID)
-	}
-
 	// Free port listeners immediately (no new connections)
 	if s.router != nil {
 		s.router.FreeAllPorts(inst.ID)
@@ -1111,11 +911,6 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 	var autoWsPath string
 	if inst.AutoWorkspace && inst.WorkspacePath != "" {
 		autoWsPath = inst.WorkspacePath
-	}
-
-	// Stop instance daemons
-	if s.daemons != nil {
-		s.daemons.StopDaemons(resolvedID)
 	}
 
 	// Free public port listeners before deleting instance
@@ -1557,134 +1352,7 @@ func (s *Server) handleBlobUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeDefaultKitConfigs writes default config files from the kit manifest
-// if they don't already exist. Called on instance creation.
-func (s *Server) writeDefaultKitConfigs(kitName, workspacePath, handle, id string) {
-	manifest, err := kit.LoadManifest(kitName)
-	if err != nil {
-		return
-	}
-
-	// Workspace configs (guest-side)
-	for _, c := range manifest.Config {
-		if c.Default == nil || workspacePath == "" {
-			continue
-		}
-		fullPath := filepath.Join(workspacePath, filepath.Clean(c.Path))
-		if _, err := os.Stat(fullPath); err == nil {
-			continue // already exists
-		}
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		formatted, err := json.MarshalIndent(json.RawMessage(c.Default), "", "  ")
-		if err != nil {
-			continue
-		}
-		os.WriteFile(fullPath, append(formatted, '\n'), 0644)
-		log.Printf("kit %s: wrote default config %s", kitName, c.Path)
-	}
-
-	// Host configs (daemon-side)
-	h := handle
-	if h == "" {
-		h = id
-	}
-	for _, d := range manifest.InstanceDaemons {
-		if d.Config == nil || d.Config.Default == nil {
-			continue
-		}
-		dir := filepath.Join(kit.KitsDir(), h)
-		fullPath := filepath.Join(dir, d.Config.Path)
-		if _, err := os.Stat(fullPath); err == nil {
-			continue // already exists
-		}
-		os.MkdirAll(dir, 0755)
-		formatted, err := json.MarshalIndent(json.RawMessage(d.Config.Default), "", "  ")
-		if err != nil {
-			continue
-		}
-		os.WriteFile(fullPath, append(formatted, '\n'), 0644)
-		log.Printf("kit %s: wrote default config %s/%s", kitName, h, d.Config.Path)
-	}
-}
-
-// Kit config handlers — host-side config at ~/.aegis/kits/{handle}/{file}
-
-func (s *Server) kitConfigDir(inst *lifecycle.Instance) string {
-	handle := inst.HandleAlias
-	if handle == "" {
-		handle = inst.ID
-	}
-	return filepath.Join(kit.KitsDir(), handle)
-}
-
-func (s *Server) handleKitConfigRead(w http.ResponseWriter, r *http.Request) {
-	id := pathParam(r, "id")
-	file := r.URL.Query().Get("file")
-	if file == "" || strings.Contains(file, "/") || strings.Contains(file, "..") {
-		writeError(w, http.StatusBadRequest, "file parameter required (filename only, no paths)")
-		return
-	}
-
-	inst := s.lifecycle.GetInstance(id)
-	if inst == nil {
-		inst = s.lifecycle.GetInstanceByHandle(id)
-	}
-	if inst == nil {
-		writeError(w, http.StatusNotFound, "instance not found")
-		return
-	}
-
-	fullPath := filepath.Join(s.kitConfigDir(inst), file)
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "config file not found")
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(data)
-}
-
-func (s *Server) handleKitConfigWrite(w http.ResponseWriter, r *http.Request) {
-	id := pathParam(r, "id")
-	file := r.URL.Query().Get("file")
-	if file == "" || strings.Contains(file, "/") || strings.Contains(file, "..") {
-		writeError(w, http.StatusBadRequest, "file parameter required (filename only, no paths)")
-		return
-	}
-
-	inst := s.lifecycle.GetInstance(id)
-	if inst == nil {
-		inst = s.lifecycle.GetInstanceByHandle(id)
-	}
-	if inst == nil {
-		writeError(w, http.StatusNotFound, "instance not found")
-		return
-	}
-
-	data, err := io.ReadAll(io.LimitReader(r.Body, maxWorkspaceFileSize+1))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "read body failed")
-		return
-	}
-	if len(data) > maxWorkspaceFileSize {
-		writeError(w, http.StatusRequestEntityTooLarge, "file too large (10MB limit)")
-		return
-	}
-
-	dir := s.kitConfigDir(inst)
-	os.MkdirAll(dir, 0755)
-
-	if err := os.WriteFile(filepath.Join(dir, file), data, 0644); err != nil {
-		writeError(w, http.StatusInternalServerError, "write failed")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// Tether handlers — Agent Kit messaging
+// Tether handlers — host-guest messaging
 
 func (s *Server) handleTetherIngress(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")

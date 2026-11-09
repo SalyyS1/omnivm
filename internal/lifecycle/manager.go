@@ -27,7 +27,6 @@ import (
 
 	"github.com/xfeldman/aegisvm/internal/config"
 	"github.com/xfeldman/aegisvm/internal/image"
-	"github.com/xfeldman/aegisvm/internal/kit"
 	"github.com/xfeldman/aegisvm/internal/logstore"
 	"github.com/xfeldman/aegisvm/internal/overlay"
 	"github.com/xfeldman/aegisvm/internal/registry"
@@ -58,8 +57,8 @@ type Instance struct {
 
 	ID          string
 	State       string
-	Enabled     bool   // policy flag: true = wake-on-connect allowed, false = unreachable
-	Command []string
+	Enabled     bool // policy flag: true = wake-on-connect allowed, false = unreachable
+	Command     []string
 	ExposePorts []vmm.PortExpose
 	Handle      vmm.Handle
 	Channel     vmm.ControlChannel
@@ -98,9 +97,6 @@ type Instance struct {
 
 	lastActivity time.Time
 
-	// Kit is the name of the kit used to create this instance (empty = no kit).
-	Kit string
-
 	// HarnessVersion is reported by the harness in the run RPC response.
 	HarnessVersion string
 
@@ -125,8 +121,8 @@ type Instance struct {
 	execWaiters map[string]chan int
 
 	// Crash backoff — prevents rapid restart loops
-	crashCount    int       // consecutive crashes (reset on successful run > 10s)
-	lastCrashAt   time.Time // time of last crash
+	crashCount  int       // consecutive crashes (reset on successful run > 10s)
+	lastCrashAt time.Time // time of last crash
 
 	// Timestamps
 	CreatedAt time.Time
@@ -184,11 +180,11 @@ type Manager struct {
 
 	// Callbacks
 	onStateChange   func(id, state string)
-	onAllocatePorts func(inst *Instance)                            // router port allocation
-	getPublicPorts  func(id string) map[int]int                     // guestPort → publicPort lookup
+	onAllocatePorts func(inst *Instance)                                                     // router port allocation
+	getPublicPorts  func(id string) map[int]int                                              // guestPort → publicPort lookup
 	onExposePort    func(id string, guestPort, publicPort int, protocol string) (int, error) // runtime expose
-	onUnexposePort  func(id string, guestPort int)                  // runtime unexpose
-	onPreBoot       func(inst *Instance)                            // resolve secrets before boot
+	onUnexposePort  func(id string, guestPort int)                                           // runtime unexpose
+	onPreBoot       func(inst *Instance)                                                     // resolve secrets before boot
 }
 
 // NewManager creates a lifecycle manager.
@@ -221,23 +217,22 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 		portInts[i] = p.GuestPort
 	}
 	regInst := &registry.Instance{
-		ID:           inst.ID,
-		State:        "stopped",
-		Command:      inst.Command,
-		ExposePorts:  portInts,
-		Handle:       inst.HandleAlias,
-		ImageRef:     inst.ImageRef,
-		Workspace:      inst.WorkspacePath,
-		AutoWorkspace:  inst.AutoWorkspace,
-		Env:            inst.Env,
-		SecretKeys:     inst.SecretKeys,
-		Enabled:        inst.Enabled,
-		MemoryMB:     inst.MemoryMB,
-		VCPUs:        inst.VCPUs,
-		ParentID:     inst.ParentID,
-		Capabilities: capsJSON,
-		Kit:          inst.Kit,
-		CreatedAt:    inst.CreatedAt,
+		ID:            inst.ID,
+		State:         "stopped",
+		Command:       inst.Command,
+		ExposePorts:   portInts,
+		Handle:        inst.HandleAlias,
+		ImageRef:      inst.ImageRef,
+		Workspace:     inst.WorkspacePath,
+		AutoWorkspace: inst.AutoWorkspace,
+		Env:           inst.Env,
+		SecretKeys:    inst.SecretKeys,
+		Enabled:       inst.Enabled,
+		MemoryMB:      inst.MemoryMB,
+		VCPUs:         inst.VCPUs,
+		ParentID:      inst.ParentID,
+		Capabilities:  capsJSON,
+		CreatedAt:     inst.CreatedAt,
 	}
 	if err := m.registry.SaveInstance(regInst); err != nil {
 		log.Printf("save instance to registry: %v", err)
@@ -423,13 +418,6 @@ func WithEnabled(enabled bool) InstanceOption {
 	}
 }
 
-// WithKit sets the kit name for this instance.
-func WithKit(name string) InstanceOption {
-	return func(inst *Instance) {
-		inst.Kit = name
-	}
-}
-
 // CreateInstance creates a new instance definition without starting it.
 func (m *Manager) CreateInstance(id string, command []string, exposePorts []vmm.PortExpose, opts ...InstanceOption) *Instance {
 	now := time.Now()
@@ -541,7 +529,7 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		if err != nil {
 			inst.mu.Lock()
 			inst.State = StateStopped
-		inst.StoppedAt = time.Now()
+			inst.StoppedAt = time.Now()
 			inst.mu.Unlock()
 			m.notifyStateChange(inst.ID, StateStopped)
 			return fmt.Errorf("prepare image rootfs: %w", err)
@@ -1193,19 +1181,6 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 		return "", fmt.Errorf("inject harness: %w", err)
 	}
 
-	// Inject kit binaries if this instance uses a kit
-	if inst.Kit != "" {
-		manifest, err := kit.LoadManifest(inst.Kit)
-		if err != nil {
-			m.overlay.Remove(overlayID)
-			return "", fmt.Errorf("kit %q: %w", inst.Kit, err)
-		}
-		if err := image.InjectKitBinaries(overlayDir, m.cfg.BinDir, manifest.Image.Inject); err != nil {
-			m.overlay.Remove(overlayID)
-			return "", fmt.Errorf("inject kit binaries: %w", err)
-		}
-	}
-
 	return overlayDir, nil
 }
 
@@ -1289,7 +1264,7 @@ func (m *Manager) StopInstance(id string) error {
 	}
 
 	inst.State = StateStopped
-		inst.StoppedAt = time.Now()
+	inst.StoppedAt = time.Now()
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
@@ -1434,7 +1409,7 @@ func (m *Manager) DeleteInstance(id string) error {
 	}
 
 	inst.State = StateStopped
-		inst.StoppedAt = time.Now()
+	inst.StoppedAt = time.Now()
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil

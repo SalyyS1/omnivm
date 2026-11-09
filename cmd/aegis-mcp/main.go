@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/xfeldman/aegisvm/internal/blob"
-	"github.com/xfeldman/aegisvm/internal/kit"
 	"github.com/xfeldman/aegisvm/internal/version"
 )
 
@@ -32,9 +31,9 @@ type jsonRPCRequest struct {
 }
 
 type jsonRPCResponse struct {
-	JSONRPC string      `json:"jsonrpc"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *rpcError   `json:"error,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	Result  interface{}     `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
 	ID      json.RawMessage `json:"id"`
 }
 
@@ -168,19 +167,18 @@ func doStreamingRequest(method, path string, body interface{}) (*http.Response, 
 var tools = []mcpTool{
 	{
 		Name:        "instance_start",
-		Description: "Start a new isolated Linux microVM running a command. The VM is a fresh Alpine Linux environment — host files are NOT available unless mapped via workspace. To restart a stopped or disabled instance, pass just the name without a command. Use the 'kit' parameter with installed kits (see kit_list) to get preset command, image, and capabilities — e.g. kit='agent' for a messaging-driven LLM agent. Use instance_expose to expose ports after creation.",
+		Description: "Start a new isolated Linux microVM running a command. The VM is a fresh Alpine Linux environment — host files are NOT available unless mapped via workspace. To restart a stopped or disabled instance, pass just the name without a command. Use instance_expose to expose ports after creation.",
 		InputSchema: rawJSON(`{
 			"type": "object",
 			"properties": {
-				"command":   {"type": "array", "items": {"type": "string"}, "description": "Command to run inside the VM. Paths must be VM paths (e.g. /workspace/script.py), not host paths. Not required when using a kit (the kit provides a default command)."},
+				"command":   {"type": "array", "items": {"type": "string"}, "description": "Command to run inside the VM. Paths must be VM paths (e.g. /workspace/script.py), not host paths."},
 				"name":      {"type": "string", "description": "Human-friendly handle for the instance (e.g. 'web', 'api'). Use this to reference the instance in other tools."},
-				"kit":       {"type": "string", "description": "Kit preset name (e.g. 'agent'). Supplies default command, image, and capabilities from the kit manifest. Use kit_list to see available kits. Explicit parameters override kit defaults."},
 				"workspace": {"type": "string", "description": "Absolute host directory path to live-mount inside the VM at /workspace/. Changes on the host are immediately visible inside the VM and vice versa — no restart needed. Example: '/home/user/project' becomes /workspace/ in the VM."},
-				"image":     {"type": "string", "description": "OCI image reference for the VM root filesystem (e.g. 'python:3.12-alpine', 'node:22-alpine'). Default is python:3.12-alpine. Kit provides a default if not specified."},
+				"image":     {"type": "string", "description": "OCI image reference for the VM root filesystem (e.g. 'python:3.12-alpine', 'node:22-alpine'). Default is python:3.12-alpine."},
 				"secrets":   {"type": "array", "items": {"type": "string"}, "description": "Secret keys to inject as environment variables (must be set via secret_set first). Use '*' for all."},
 				"memory_mb": {"type": "integer", "description": "VM memory in megabytes. Default: 512."},
 				"vcpus":     {"type": "integer", "description": "Number of virtual CPUs. Default: 1."},
-				"capabilities": {"type": "object", "description": "Guest orchestration capabilities. When set, the VM gets a Guest API on http://127.0.0.1:7777 that allows it to spawn and manage child instances. Kit provides defaults if not specified.", "properties": {"spawn": {"type": "boolean", "description": "Allow this instance to spawn child instances via the Guest API."}, "spawn_depth": {"type": "integer", "description": "Maximum nesting depth. 1 = can spawn children, but children cannot spawn grandchildren. 2 = children can also spawn."}, "max_children": {"type": "integer", "description": "Maximum number of concurrent child instances."}, "allowed_images": {"type": "array", "items": {"type": "string"}, "description": "OCI image refs children can use. Use [\"*\"] for any image."}, "max_memory_mb": {"type": "integer", "description": "Maximum memory per child instance in MB."}, "max_vcpus": {"type": "integer", "description": "Maximum vCPUs per child instance."}, "max_expose_ports": {"type": "integer", "description": "Maximum exposed ports per child instance."}}}
+				"capabilities": {"type": "object", "description": "Guest orchestration capabilities. When set, the VM gets a Guest API on http://127.0.0.1:7777 that allows it to spawn and manage child instances.", "properties": {"spawn": {"type": "boolean", "description": "Allow this instance to spawn child instances via the Guest API."}, "spawn_depth": {"type": "integer", "description": "Maximum nesting depth. 1 = can spawn children, but children cannot spawn grandchildren. 2 = children can also spawn."}, "max_children": {"type": "integer", "description": "Maximum number of concurrent child instances."}, "allowed_images": {"type": "array", "items": {"type": "string"}, "description": "OCI image refs children can use. Use [\"*\"] for any image."}, "max_memory_mb": {"type": "integer", "description": "Maximum memory per child instance in MB."}, "max_vcpus": {"type": "integer", "description": "Maximum vCPUs per child instance."}, "max_expose_ports": {"type": "integer", "description": "Maximum exposed ports per child instance."}}}
 			}
 		}`),
 	},
@@ -302,7 +300,7 @@ var tools = []mcpTool{
 	},
 	{
 		Name:        "secret_list",
-		Description: "List all secret names (values are not returned). Use this to check which secrets are available before creating kit instances that require them.",
+		Description: "List all secret names (values are not returned). Use this to check which secrets are available before passing them to an instance.",
 		InputSchema: rawJSON(`{
 			"type": "object",
 			"properties": {}
@@ -317,14 +315,6 @@ var tools = []mcpTool{
 				"key": {"type": "string", "description": "Secret name to delete"}
 			},
 			"required": ["key"]
-		}`),
-	},
-	{
-		Name:        "kit_list",
-		Description: "List installed kits. Returns each kit's description, config files (with defaults), referenced_env (env vars the configs need — pass these via secrets), usage instructions, and instance defaults. Always call this before creating a kit instance.",
-		InputSchema: rawJSON(`{
-			"type": "object",
-			"properties": {}
 		}`),
 	},
 	{
@@ -380,7 +370,6 @@ func handleInstanceStart(args json.RawMessage) *mcpToolResult {
 	var params struct {
 		Command      []string               `json:"command"`
 		Name         string                 `json:"name"`
-		Kit          string                 `json:"kit"`
 		Workspace    string                 `json:"workspace"`
 		Image        string                 `json:"image"`
 		Env          map[string]string      `json:"env"`
@@ -393,8 +382,8 @@ func handleInstanceStart(args json.RawMessage) *mcpToolResult {
 		return errorResult("invalid arguments: " + err.Error())
 	}
 
-	// If no command, no kit, but name is given, this is a restart of a stopped instance
-	if len(params.Command) == 0 && params.Kit == "" && params.Name != "" {
+	// If no command but name is given, this is a restart of a stopped instance
+	if len(params.Command) == 0 && params.Name != "" {
 		body := map[string]interface{}{"handle": params.Name}
 		status, data, err := doRequest("POST", "/v1/instances", body)
 		if err != nil {
@@ -406,48 +395,12 @@ func handleInstanceStart(args json.RawMessage) *mcpToolResult {
 		return textResult(string(data))
 	}
 
-	// Apply kit defaults if specified
-	if params.Kit != "" {
-		manifest, err := loadKitManifest(params.Kit)
-		if err != nil {
-			return errorResult(fmt.Sprintf("kit %q: %v", params.Kit, err))
-		}
-		if params.Image == "" {
-			if base, ok := manifest["image"].(map[string]interface{}); ok {
-				if b, ok := base["base"].(string); ok {
-					params.Image = b
-				}
-			}
-		}
-		if len(params.Command) == 0 {
-			if defaults, ok := manifest["defaults"].(map[string]interface{}); ok {
-				if cmd, ok := defaults["command"].([]interface{}); ok {
-					for _, c := range cmd {
-						if s, ok := c.(string); ok {
-							params.Command = append(params.Command, s)
-						}
-					}
-				}
-			}
-		}
-		if len(params.Capabilities) == 0 {
-			if defaults, ok := manifest["defaults"].(map[string]interface{}); ok {
-				if caps, ok := defaults["capabilities"].(map[string]interface{}); ok {
-					params.Capabilities = caps
-				}
-			}
-		}
-	}
-
 	if len(params.Command) == 0 {
-		return errorResult("command is required (or use a kit that provides a default command)")
+		return errorResult("command is required")
 	}
 
 	body := map[string]interface{}{
 		"command": params.Command,
-	}
-	if params.Kit != "" {
-		body["kit"] = params.Kit
 	}
 	if params.Name != "" {
 		body["handle"] = params.Name
@@ -796,28 +749,6 @@ func handleInstanceUnexpose(args json.RawMessage) *mcpToolResult {
 	return textResult("port unexposed")
 }
 
-func loadKitManifest(name string) (map[string]interface{}, error) {
-	manifest, err := kit.LoadManifest(name)
-	if err != nil {
-		return nil, err
-	}
-	// Convert to generic map for JSON flexibility in handleInstanceStart
-	data, _ := json.Marshal(manifest)
-	var m map[string]interface{}
-	json.Unmarshal(data, &m)
-	return m, nil
-}
-
-func handleKitList(args json.RawMessage) *mcpToolResult {
-	manifests, _ := kit.ListManifests()
-	if len(manifests) == 0 {
-		return textResult("No kits installed.")
-	}
-
-	data, _ := json.MarshalIndent(manifests, "", "  ")
-	return textResult(string(data))
-}
-
 func handleTetherSend(args json.RawMessage) *mcpToolResult {
 	var params struct {
 		Instance  string `json:"instance"`
@@ -1074,7 +1005,6 @@ var toolHandlers = map[string]func(json.RawMessage) *mcpToolResult{
 	"secret_set":        handleSecretSet,
 	"secret_list":       handleSecretList,
 	"secret_delete":     handleSecretDelete,
-	"kit_list":          handleKitList,
 	"tether_send":       handleTetherSend,
 	"tether_read":       handleTetherRead,
 }
@@ -1134,26 +1064,10 @@ Key concepts:
 - Use "exec" to run commands inside a running instance. Use "logs" to see instance output.
 - Use "name" to give instances human-friendly handles for easy reference.
 
-Kits:
-- Kits are optional add-on bundles that provide preset configurations for instances.
-- BEFORE creating a kit instance, call kit_list. Each kit returns a referenced_env array listing secrets its configs need. Then call secret_list to verify matching secrets exist.
-- Use instance_start with kit="<name>" to create an instance with kit defaults. Explicit parameters override.
-- Pass the kit's referenced_env via the secrets parameter (e.g. secrets=["OPENAI_API_KEY"]). Without them the instance will start but configs will reference empty env vars.
-- If the task involves creating or modifying files the user needs, pass workspace to mount their project directory.
-- Example: instance_start with kit="agent", name="my-agent", secrets=["OPENAI_API_KEY"], workspace="/path/to/project" creates a messaging-driven LLM agent with access to the project files.
-
-Tether — talk to an agent inside a VM:
-- Kit instances (--kit agent) run an LLM agent inside the VM that you can communicate with via tether.
-- tether_send sends a natural language message to the in-VM agent. The VM wakes automatically if paused or stopped.
-- tether_read reads the agent's response. It supports long-polling (wait_ms) so you can block until the response arrives.
-- The agent inside the VM has its own LLM context, session history, and access to MCP tools (can spawn child VMs, run commands, manage files).
-- Use tether for delegation ("research X and report back"), debugging ("what is your current state"), or orchestration.
-
-When to use tether vs exec:
-- exec runs a shell command inside the VM and returns output. Good for one-off commands (ls, cat, pip install).
-- tether sends a message to the in-VM LLM agent and gets an intelligent response. Good for tasks that need reasoning, multi-step work, or conversation context.
-- If tether fails (e.g. "No LLM API key configured"), fix the root cause (recreate the instance with the correct secrets) rather than falling back to exec to do the agent's job manually.
-
+Tether — message a program inside a VM:
+- Tether is an ordered, sessioned message channel between the host and a guest program that speaks the tether protocol over the guest API.
+- tether_send sends a message to the guest program. The VM wakes automatically if paused or stopped.
+- tether_read reads the guest program's responses. It supports long-polling (wait_ms) so you can block until the response arrives.
 Tether conversation pattern:
   1. tether_send(instance="my-agent", text="Analyze the CSV file in /workspace/data.csv")
      Returns {msg_id, session_id, ingress_seq}
@@ -1164,13 +1078,6 @@ Tether conversation pattern:
   4. Frame types: "status.presence" (agent is thinking), "assistant.delta" (streaming text chunk), "assistant.done" (complete response).
 
 Sessions: each tether_send uses a session_id (default: "default"). Use different session_ids for independent conversations with the same agent. Sessions maintain separate conversation histories.
-
-Example — delegate research to an agent:
-  1. kit_list — check referenced_env (agent kit needs OPENAI_API_KEY from api_key_env in agent.json default)
-  2. secret_list — verify the required secrets are available
-  3. instance_start with kit="agent", name="researcher", secrets=["OPENAI_API_KEY"], workspace="/path/to/project"
-  4. tether_send(instance="researcher", text="Find the top 5 Python libraries for data visualization and explain each")
-  5. tether_read(instance="researcher", after_seq=<ingress_seq>, wait_ms=15000) — repeat until assistant.done
 
 Example — run a script directly:
   1. instance_start with workspace="/path/to/project", command=["python3", "/workspace/script.py"], name="myapp"

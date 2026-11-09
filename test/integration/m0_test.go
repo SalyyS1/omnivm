@@ -53,7 +53,7 @@ func TestDaemonStatus(t *testing.T) {
 	if !strings.Contains(out, "running") {
 		t.Fatalf("expected 'running' in status, got: %s", out)
 	}
-	if !strings.Contains(out, "libkrun") {
-		t.Fatalf("expected 'libkrun' backend in status, got: %s", out)
+	if !strings.Contains(out, "cloud-hypervisor") {
+		t.Fatalf("expected 'cloud-hypervisor' backend in status, got: %s", out)
 	}
 }
