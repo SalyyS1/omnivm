@@ -284,7 +284,7 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 		"OVM_VSOCK_CID=2",
 		fmt.Sprintf("OVM_NET_IP=%s/30", inst.guestIP),
 		fmt.Sprintf("OVM_NET_GW=%s", inst.hostIP),
-		"OVM_NET_DNS=8.8.8.8",
+		"OVM_NET_DNS=" + v.cfg.DNSServer,
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/root",
 		"TERM=linux",

@@ -65,6 +65,17 @@ type Config struct {
 	// VirtiofsdBin is the path to the virtiofsd binary.
 	// Empty means search PATH.
 	VirtiofsdBin string
+
+	// DNSServer is the resolver IPv4 address handed to guests. Set via the
+	// OVM_DNS environment variable; when empty, ResolveDNS derives it from
+	// the host resolver configuration.
+	DNSServer string
+
+	// MinDiskMB is the smallest root disk created for an instance.
+	MinDiskMB int
+
+	// MaxDiskMB caps the root disk size an instance may request.
+	MaxDiskMB int
 }
 
 // DefaultConfig returns the default configuration.
@@ -99,6 +110,9 @@ func DefaultConfig() *Config {
 		StopAfterIdle:   5 * time.Minute,
 		NetworkBackend:  "auto",
 		KernelPath:      kernelPath,
+		DNSServer:       os.Getenv("OVM_DNS"),
+		MinDiskMB:       512,
+		MaxDiskMB:       64 * 1024,
 	}
 }
 

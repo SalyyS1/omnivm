@@ -118,8 +118,8 @@ func mountEssential() {
 	setupNetwork()
 
 	// Ensure /etc/resolv.conf exists (OCI images often lack it).
-	// In gvproxy mode, setupNetwork() already wrote it with the gateway DNS.
-	// In TSI mode, fall back to 8.8.8.8.
+	// setupNetwork() normally writes it from OVM_NET_DNS; this fallback only
+	// applies when the guest has no network configuration.
 	if _, err := os.Stat("/etc/resolv.conf"); os.IsNotExist(err) {
 		if err := os.WriteFile("/etc/resolv.conf", []byte("nameserver 8.8.8.8\n"), 0644); err != nil {
 			log.Printf("write /etc/resolv.conf: %v (non-fatal, DNS may not work)", err)

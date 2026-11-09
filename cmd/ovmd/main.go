@@ -48,6 +48,8 @@ func main() {
 	// Resolve network backend
 	cfg.ResolveNetworkBackend()
 	cfg.ResolveBinaries()
+	cfg.ResolveDNS()
+	log.Printf("guest DNS server: %s", cfg.DNSServer)
 	log.Printf("network backend: %s", cfg.NetworkBackend)
 
 	// Initialize VMM backend
@@ -251,6 +253,9 @@ func main() {
 			opts = append(opts, lifecycle.WithEnabled(ri.Enabled))
 			if ri.MemoryMB > 0 {
 				opts = append(opts, lifecycle.WithMemory(ri.MemoryMB))
+			}
+			if ri.DiskMB > 0 {
+				opts = append(opts, lifecycle.WithDiskMB(ri.DiskMB))
 			}
 			if ri.VCPUs > 0 {
 				opts = append(opts, lifecycle.WithVCPUs(ri.VCPUs))
