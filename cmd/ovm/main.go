@@ -336,8 +336,8 @@ type exposeFlag struct {
 	Protocol   string // "http", "tcp", etc. Default: "http"
 }
 
-// parseRunFlags parses common flags: --name, --secret, --image, --workspace
-func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, command []string) {
+// parseRunFlags parses common flags: --name, --secret, --image, --workspace, --disk-size
+func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, diskMB int, command []string) {
 	envVars = make(map[string]string)
 
 	for i := 0; i < len(args); i++ {
@@ -373,6 +373,18 @@ func parseRunFlags(args []string) (name, imageRef string, envVars map[string]str
 				os.Exit(1)
 			}
 			workspace = args[i+1]
+			i++
+		case "--disk-size":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--disk-size requires a size in MB")
+				os.Exit(1)
+			}
+			mb, err := strconv.Atoi(args[i+1])
+			if err != nil || mb <= 0 {
+				fmt.Fprintf(os.Stderr, "invalid --disk-size %q: expected a positive number of MB\n", args[i+1])
+				os.Exit(1)
+			}
+			diskMB = mb
 			i++
 		}
 	}
@@ -427,7 +439,7 @@ func parseExposeArg(arg string) exposeFlag {
 func cmdRun() {
 	args := os.Args[2:]
 
-	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
+	name, imageRef, envVars, secretKeys, workspace, diskMB, command := parseRunFlags(args)
 
 	if len(command) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: ovm run [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
@@ -457,6 +469,9 @@ func cmdRun() {
 	reqBody := map[string]interface{}{
 		"command":   command,
 		"workspace": workspace,
+	}
+	if diskMB > 0 {
+		reqBody["disk_mb"] = diskMB
 	}
 	if name != "" {
 		reqBody["handle"] = name
@@ -771,7 +786,7 @@ Examples:
 func cmdInstanceStart(client *http.Client) {
 	args := os.Args[3:]
 
-	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
+	name, imageRef, envVars, secretKeys, workspace, diskMB, command := parseRunFlags(args)
 
 	if len(command) == 0 && name == "" {
 		fmt.Fprintln(os.Stderr, "usage: ovm instance start [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
@@ -802,6 +817,9 @@ func cmdInstanceStart(client *http.Client) {
 	}
 	if workspace != "" {
 		reqBody["workspace"] = workspace
+	}
+	if diskMB > 0 {
+		reqBody["disk_mb"] = diskMB
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)

@@ -124,7 +124,7 @@ the instance. If `--workspace` is omitted, a temporary workspace is allocated
 and deleted after. If `--workspace` is provided, that workspace is preserved.
 
 ```
-ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] [--disk-size MB] -- COMMAND [ARGS...]
 ```
 
 **Flags:**
@@ -136,6 +136,7 @@ ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--secre
 | `--name NAME` | Handle alias for the instance. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
 | `--workspace NAME_OR_PATH` | Named workspace (e.g., `claw`) or host path (e.g., `./myapp`). Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
+| `--disk-size MB` | Root disk size in MB. Default: sized from the image contents plus headroom (at least 512MB). Must fit the image and stay within the daemon limit (64GB). |
 
 Creates an instance via `POST /v1/instances`, streams logs, and watches for
 process exit. On Ctrl+C or process exit, sends `DELETE /v1/instances/{id}` to
@@ -174,7 +175,7 @@ Run `ovm instance help` to print subcommand usage.
 Start a new instance, or restart a stopped instance by handle.
 
 ```
-ovm instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] [--disk-size MB] -- COMMAND [ARGS...]
 ovm instance start --name NAME                          (restart stopped instance)
 ```
 
@@ -191,6 +192,7 @@ is RUNNING or STARTING, returns 409. If not found, creates a new instance.
 | `--image IMAGE` | OCI image reference. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
 | `--workspace NAME_OR_PATH` | Named workspace or host path. Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
+| `--disk-size MB` | Root disk size in MB. Default: sized from the image contents plus headroom (at least 512MB). Must fit the image and stay within the daemon limit (64GB). |
 
 **Examples:**
 

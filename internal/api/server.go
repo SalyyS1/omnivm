@@ -172,6 +172,7 @@ type createInstanceRequest struct {
 	Handle       string                     `json:"handle,omitempty"`
 	Workspace    string                     `json:"workspace,omitempty"`
 	MemoryMB     int                        `json:"memory_mb,omitempty"`
+	DiskMB       int                        `json:"disk_mb,omitempty"`
 	VCPUs        int                        `json:"vcpus,omitempty"`
 	IdlePolicy   string                     `json:"idle_policy,omitempty"`
 	Capabilities *lifecycle.CapabilityToken `json:"capabilities,omitempty"` // guest orchestration capabilities
@@ -248,6 +249,13 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.MemoryMB > 0 {
 		opts = append(opts, lifecycle.WithMemory(req.MemoryMB))
+	}
+	if req.DiskMB < 0 || req.DiskMB > s.cfg.MaxDiskMB {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("disk_mb must be between 0 and %d", s.cfg.MaxDiskMB))
+		return
+	}
+	if req.DiskMB > 0 {
+		opts = append(opts, lifecycle.WithDiskMB(req.DiskMB))
 	}
 	if req.VCPUs > 0 {
 		opts = append(opts, lifecycle.WithVCPUs(req.VCPUs))

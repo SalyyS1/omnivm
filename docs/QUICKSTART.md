@@ -63,6 +63,12 @@ Use another image with `--image`:
 ovm run --image alpine:3.21 -- echo hello
 ```
 
+The root disk is sized from the image contents plus 256MB of headroom (at least 512MB).
+Ask for more with `--disk-size MB`.
+
+Guests use the host's first non-loopback IPv4 resolver for DNS. Set `OVM_DNS=<ipv4>`
+in `ovmd`'s environment to override it.
+
 ## 5. Mount a host directory
 
 ```bash

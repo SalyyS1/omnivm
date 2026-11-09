@@ -77,6 +77,8 @@ type Instance struct {
 	// Resource overrides (0 = use global default)
 	MemoryMB int
 	VCPUs    int
+	// DiskMB is the requested root disk size (0 = sized from the image).
+	DiskMB int
 
 	// Env holds explicit (non-secret) environment variables to inject.
 	Env map[string]string
@@ -229,6 +231,7 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 		SecretKeys:    inst.SecretKeys,
 		Enabled:       inst.Enabled,
 		MemoryMB:      inst.MemoryMB,
+		DiskMB:        inst.DiskMB,
 		VCPUs:         inst.VCPUs,
 		ParentID:      inst.ParentID,
 		Capabilities:  capsJSON,
@@ -375,6 +378,13 @@ func WithSecretKeys(keys []string) InstanceOption {
 func WithMemory(mb int) InstanceOption {
 	return func(inst *Instance) {
 		inst.MemoryMB = mb
+	}
+}
+
+// WithDiskMB sets the root disk size in megabytes (0 = sized from the image).
+func WithDiskMB(mb int) InstanceOption {
+	return func(inst *Instance) {
+		inst.DiskMB = mb
 	}
 }
 
@@ -559,7 +569,7 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 			// First boot — convert directory to ext4
 			log.Printf("instance %s: converting directory rootfs to ext4: %s", inst.ID, rootfsPath)
 			var err error
-			rootfsPath, err = dirToExt4(rootfsPath, 512)
+			rootfsPath, err = m.buildRootDisk(rootfsPath, inst.DiskMB)
 			if err != nil {
 				inst.mu.Lock()
 				inst.State = StateStopped
@@ -1182,6 +1192,22 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 	}
 
 	return overlayDir, nil
+}
+
+// buildRootDisk converts an instance rootfs directory into its ext4 root
+// disk, sized from the directory contents or the requested size.
+func (m *Manager) buildRootDisk(dir string, requestedMB int) (string, error) {
+	used, err := dirUsageBytes(dir)
+	if err != nil {
+		return "", fmt.Errorf("measure rootfs: %w", err)
+	}
+	usedMB := int((used + (1<<20 - 1)) >> 20)
+	sizeMB, err := rootDiskSizeMB(usedMB, requestedMB, m.cfg.MinDiskMB, m.cfg.MaxDiskMB)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("rootfs %s: contents ~%dMB, root disk %dMB", dir, usedMB, sizeMB)
+	return dirToExt4(dir, sizeMB)
 }
 
 // dirToExt4 creates an ext4 block image from a directory.
