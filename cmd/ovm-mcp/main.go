@@ -319,12 +319,12 @@ var tools = []mcpTool{
 	},
 	{
 		Name:        "tether_send",
-		Description: "Send a natural language message to the LLM agent running inside a VM instance. The instance wakes automatically if paused or stopped (wake-on-message). The agent processes the message using its own LLM context and tools, then streams a response. Use tether_read to receive the response. Use this for delegation ('go research X'), debugging ('what are you working on'), or any task that benefits from an isolated agent with its own context and tools.",
+		Description: "Send a message to the program running inside a VM instance over tether. The instance wakes automatically if paused or stopped (wake-on-message). The in-VM program must implement the tether protocol (see docs/TETHER.md). Use tether_read to receive its replies.",
 		InputSchema: rawJSON(`{
 			"type": "object",
 			"properties": {
 				"instance":   {"type": "string", "description": "Instance handle or ID"},
-				"text":       {"type": "string", "description": "Message text to send to the agent"},
+				"text":       {"type": "string", "description": "Message text to send to the in-VM program"},
 				"images": {
 					"type": "array",
 					"description": "Images to include with the message. Each image is base64-encoded.",
@@ -344,7 +344,7 @@ var tools = []mcpTool{
 	},
 	{
 		Name:        "tether_read",
-		Description: "Read response frames from the LLM agent inside a VM instance. Returns new frames since the given cursor. Supports long-polling: set wait_ms (e.g. 15000) to block until frames arrive or timeout. Call in a loop until you see an 'assistant.done' frame, which contains the complete response. Use ingress_seq from tether_send as your initial after_seq, then use next_seq from each response as the cursor for the next call.",
+		Description: "Read frames sent by the program inside a VM instance. Returns new frames since the given cursor. Supports long-polling: set wait_ms (e.g. 15000) to block until frames arrive or timeout. Call in a loop until you see an 'assistant.done' frame, which marks a complete response. Use ingress_seq from tether_send as your initial after_seq, then use next_seq from each response as the cursor for the next call.",
 		InputSchema: rawJSON(`{
 			"type": "object",
 			"properties": {
@@ -1068,16 +1068,17 @@ Tether — message a program inside a VM:
 - Tether is an ordered, sessioned message channel between the host and a guest program that speaks the tether protocol over the guest API.
 - tether_send sends a message to the guest program. The VM wakes automatically if paused or stopped.
 - tether_read reads the guest program's responses. It supports long-polling (wait_ms) so you can block until the response arrives.
+
 Tether conversation pattern:
-  1. tether_send(instance="my-agent", text="Analyze the CSV file in /workspace/data.csv")
+  1. tether_send(instance="my-worker", text="Analyze the CSV file in /workspace/data.csv")
      Returns {msg_id, session_id, ingress_seq}
-  2. tether_read(instance="my-agent", after_seq=<ingress_seq>, wait_ms=15000)
+  2. tether_read(instance="my-worker", after_seq=<ingress_seq>, wait_ms=15000)
      Returns {frames: [...], next_seq, timed_out}
      Look for type="assistant.done" in frames — that's the complete response.
   3. If no assistant.done yet, call tether_read again with after_seq=<next_seq> to continue reading.
-  4. Frame types: "status.presence" (agent is thinking), "assistant.delta" (streaming text chunk), "assistant.done" (complete response).
+  4. Frame types: "status.presence" (guest is working), "assistant.delta" (streaming text chunk), "assistant.done" (complete response).
 
-Sessions: each tether_send uses a session_id (default: "default"). Use different session_ids for independent conversations with the same agent. Sessions maintain separate conversation histories.
+Sessions: each tether_send uses a session_id (default: "default"). Use different session_ids for independent conversations with the same instance. Sessions maintain separate conversation histories.
 
 Example — run a script directly:
   1. instance_start with workspace="/path/to/project", command=["python3", "/workspace/script.py"], name="myapp"

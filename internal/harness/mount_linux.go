@@ -139,7 +139,7 @@ func mountEssential() {
 	mountWorkspace()
 
 	// Rootfs stays writable. On both platforms the rootfs is a per-instance
-	// disposable copy (overlay directory on macOS, ext4 image on Linux).
+	// disposable copy (ext4 image).
 	// Agents need to install packages (apk add), write /etc/local.d/app.start
 	// for autostart, configure services, etc.
 

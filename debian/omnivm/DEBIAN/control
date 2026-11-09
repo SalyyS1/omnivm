@@ -4,9 +4,9 @@ Section: devel
 Priority: optional
 Architecture: __ARCH__
 Depends: virtiofsd, e2fsprogs, iptables, iproute2
-Maintainer: OmniVM <omnivm@xfeldman.dev>
+Maintainer: SalyyS1 <1tranducnhan.2021@gmail.com>
 Homepage: https://github.com/SalyyS1/omnivm
-Description: Local agent runtime platform using isolated microVMs
- OmniVM runs AI agent workloads inside isolated Linux microVMs.
- Includes ovmd daemon, ovm CLI, Cloud Hypervisor VMM, and
- a prebuilt microVM kernel.
+Description: Scale-to-zero microVM runtime on Cloud Hypervisor
+ OmniVM runs untrusted workloads inside isolated Linux microVMs that
+ pause when idle and wake on demand. Includes the ovmd daemon, ovm CLI,
+ Cloud Hypervisor VMM, and a prebuilt microVM kernel.

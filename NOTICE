@@ -1,0 +1,12 @@
+OmniVM
+Copyright 2026 SalyyS1
+
+This product is a fork of AegisVM (https://github.com/xfeldman/aegisvm),
+Copyright 2026 AegisVM Contributors (original author: Max Feldman),
+licensed under the Apache License, Version 2.0.
+
+Changes from AegisVM include: removal of the macOS/libkrun backend, the
+desktop application, packaging for macOS, and the kit system (Agent Kit,
+messaging gateway); renaming of the project, binaries, environment
+variables and paths to OmniVM. The full list of modifications is recorded
+in this repository's git history.

@@ -1,6 +1,6 @@
 # OmniVM CLI Reference
 
-The `ovm` command is the primary interface to the OmniVM agent runtime platform.
+The `ovm` command is the primary interface to OmniVM.
 All commands communicate with the `ovmd` daemon over a Unix socket at
 `~/.omnivm/ovmd.sock`. The daemon PID file is stored at `~/.omnivm/data/ovmd.pid`.
 
@@ -26,8 +26,8 @@ these differences matter:
 | `VOLUME` | Ignored. Writable paths are fixed (`/workspace`, `/tmp`, `/run`, `/var`). |
 
 One process per VM. No `docker compose`. No restart supervisor -- if your
-process exits, the instance stops. See `docs/AGENT_CONVENTIONS.md` for the full
-guest environment contract.
+process exits, the instance stops. See [GUEST_API.md](GUEST_API.md) for the
+API available to programs inside the VM.
 
 ---
 
@@ -44,15 +44,6 @@ ovm up
 Locates the `ovmd` binary next to the `ovm` binary, starts it as a
 subprocess, and waits up to 2 seconds for the PID file to appear. If the
 daemon is already running, prints a message and exits without error.
-
-Kit daemons (e.g., `ovm-gateway`) are managed per-instance by ovmd, not
-by `ovm up`. When an instance with a kit that declares `instance_daemons`
-is created or enabled, ovmd spawns the daemon automatically. See
-[Agent Kit docs](AGENT_KIT.md) for details.
-
-If no base rootfs is installed at `~/.omnivm/base-rootfs/`, automatically
-downloads the default variant (`python` — Alpine + Python 3.12) before
-starting the daemon. See `ovm rootfs` for managing rootfs variants.
 
 **Example:**
 
@@ -72,7 +63,7 @@ Stop the ovmd daemon.
 ovm down
 ```
 
-Stops ovmd, which in turn stops all per-instance kit daemons and VMs. Sends
+Stops ovmd, which in turn stops all VMs. Sends
 SIGTERM and waits up to 5 seconds for the process to exit. If the daemon is
 not running, prints a message and exits without error.
 
@@ -102,7 +93,7 @@ the backend name.
 ```
 $ ovm status
 ovmd: running
-backend: libkrun
+backend: cloud-hypervisor
 ```
 
 ---
@@ -117,9 +108,10 @@ ovm doctor
 
 Checks for the presence of required tools and libraries:
 
-- Go
-- krunvm (optional -- libkrun CLI, not used by OmniVM directly)
-- libkrun shared library
+- `/dev/kvm`
+- `cloud-hypervisor` binary
+- `virtiofsd` binary
+- microVM kernel
 - e2fsprogs / `mkfs.ext4`
 - Daemon status and capabilities
 
@@ -132,17 +124,16 @@ the instance. If `--workspace` is omitted, a temporary workspace is allocated
 and deleted after. If `--workspace` is provided, that workspace is preserved.
 
 ```
-ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
 ```
 
 **Flags:**
 
 | Flag | Description |
 |---|---|
-| `--image IMAGE` | OCI image reference (e.g., `alpine:3.21`). Without this, the base rootfs is used. |
+| `--image IMAGE` | OCI image reference (e.g., `alpine:3.21`). Default: `python:3.12-alpine`. |
 | `--expose [PUBLIC:]GUEST[/PROTO]` | Port to expose. `8080:80` maps public 8080 to guest 80. `80` assigns a random public port. Optional `/tcp` or `/http` protocol hint. May be specified multiple times. |
 | `--name NAME` | Handle alias for the instance. |
-| `--kit KIT` | Kit preset name (e.g., `agent`). Supplies defaults for command, image, and capabilities from the kit manifest. Explicit flags override kit defaults. See `ovm kit list`. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
 | `--workspace NAME_OR_PATH` | Named workspace (e.g., `claw`) or host path (e.g., `./myapp`). Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
 
@@ -183,7 +174,7 @@ Run `ovm instance help` to print subcommand usage.
 Start a new instance, or restart a stopped instance by handle.
 
 ```
-ovm instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
 ovm instance start --name NAME                          (restart stopped instance)
 ```
 
@@ -198,22 +189,13 @@ is RUNNING or STARTING, returns 409. If not found, creates a new instance.
 | `--name NAME` | Handle alias (used for routing, exec, logs, restart). |
 | `--expose [PUBLIC:]GUEST[/PROTO]` | Port to expose. `8080:80` maps public 8080 to guest 80. `80` assigns random. May be specified multiple times. |
 | `--image IMAGE` | OCI image reference. |
-| `--kit KIT` | Kit preset. Supplies defaults for command, image, and capabilities from the kit manifest. Explicit flags override. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
 | `--workspace NAME_OR_PATH` | Named workspace or host path. Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
 
 **Examples:**
 
 ```
-# Start with a kit (supplies command, image, capabilities from manifest)
-$ ovm instance start --kit agent --name my-agent --secret OPENAI_API_KEY
-Instance started: inst-173f...
-Handle: my-agent
-
-# Kit with command override (debug shell in a kit-configured VM)
-$ ovm instance start --kit agent --name debug --secret OPENAI_API_KEY -- sh
-
-# Start without a kit
+# Start a named instance
 $ ovm instance start --name web --expose 8080:80 --workspace myapp -- python3 -m http.server 80
 Instance started: inst-173f...
 Handle: web
@@ -266,19 +248,6 @@ Accepts either a handle alias or instance ID.
 **Examples:**
 
 ```
-$ ovm instance info my-agent
-Handle:      my-agent
-ID:          inst-1739893456789012345
-State:       running
-Enabled:     true
-Image:       python:3.12-alpine
-Kit:         agent
-Command:     ovm-agent
-Gateway:     running
-Connections: 0
-Created:     2026-02-19T10:30:00Z
-Last Active: 2026-02-19T10:35:00Z
-
 $ ovm instance info web
 Handle:      web
 ID:          inst-1739893456789054321
@@ -290,12 +259,6 @@ Endpoints:
 Connections: 0
 Created:     2026-02-19T10:30:00Z
 Last Active: 2026-02-19T10:35:00Z
-```
-
-If a kit has been uninstalled but the instance still references it:
-
-```
-Kit:         agent (not installed)
 ```
 
 ---
@@ -525,79 +488,6 @@ Secret API_KEY deleted
 
 ---
 
-## Kit Commands
-
-Manage kits — optional add-on bundles that extend OmniVM with specific
-capabilities. Kit manifests live at `~/.omnivm/kits/<name>.json`.
-
-Run `ovm kit help` to print subcommand usage.
-
-### ovm kit list
-
-List installed kits with validation status.
-
-```
-ovm kit list
-```
-
-Shows each kit's name, version, status, and description. Status is `ok` if all
-required binaries (daemons + inject) are present, or `broken` with a list of
-missing binaries.
-
-**Examples:**
-
-```
-$ ovm kit list
-NAME         VERSION    STATUS     DESCRIPTION
-agent        v0.4.0     ok         Messaging-driven LLM agent with Telegram integration
-
-$ ovm kit list
-NAME         VERSION    STATUS     DESCRIPTION
-agent        v0.4.0     broken     Messaging-driven LLM agent (missing: ovm-agent)
-```
-
-No kits installed:
-
-```
-$ ovm kit list
-No kits installed.
-```
-
----
-
-## UI Command
-
-### ovm ui
-
-Start the web UI for managing instances, secrets, and kit configuration.
-
-```
-ovm ui [--port PORT]
-```
-
-Opens a browser to `http://localhost:7700` (default). The UI proxies API requests to ovmd via the unix socket. If ovmd is not running, it is started automatically.
-
-| Flag | Description |
-|---|---|
-| `--port PORT` | HTTP listen port (default: 7700) |
-
-**Features:**
-- Dashboard with instance list, status, and quick actions
-- Instance detail: Info, Logs, Exec, Chat, Kit Config tabs
-- New Instance creation with kit/secret selection
-- Secrets management (add/delete)
-- Kit Config editor with JSON syntax highlighting
-- Tether-based agent chat with streaming
-
-**Examples:**
-
-```bash
-ovm ui              # default port 7700
-ovm ui --port 9090  # custom port
-```
-
----
-
 ## MCP Commands
 
 Manage the MCP (Model Context Protocol) server integration with Claude Code.
@@ -618,7 +508,7 @@ By default, registers with `user` scope (available across all projects). Pass
 ```
 $ ovm mcp install
 ovm MCP server registered in Claude Code
-  binary: /opt/homebrew/bin/ovm-mcp
+  binary: /usr/local/bin/ovm-mcp
   scope:  user
 ```
 
@@ -638,8 +528,8 @@ ovm mcp uninstall
 
 | Command | Description |
 |---|---|
-| `ovm up` | Start daemon (kit daemons are per-instance, managed by ovmd) |
-| `ovm down` | Stop daemon (stops all kit daemons and VMs) |
+| `ovm up` | Start daemon |
+| `ovm down` | Stop daemon (stops all VMs) |
 | `ovm status` | Show daemon status |
 | `ovm doctor` | Diagnose environment |
 | `ovm run [...] -- CMD` | Ephemeral: start + follow + delete |
@@ -656,6 +546,5 @@ ovm mcp uninstall
 | `ovm secret set` | Set a secret |
 | `ovm secret list` | List secret names |
 | `ovm secret delete` | Delete a secret |
-| `ovm kit list` | List installed kits |
 | `ovm mcp install` | Register MCP server in Claude Code |
 | `ovm mcp uninstall` | Remove MCP server from Claude Code |

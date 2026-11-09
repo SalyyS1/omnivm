@@ -210,7 +210,7 @@ async function handleBuildRequest(chatId, repoUrl) {
 
 ## MCP Server for LLM Agents
 
-For LLM agents (Claude, OpenClaw, etc.) running inside a VM, the Guest API is also available as an MCP server: `ovm-mcp-guest`.
+For LLM agents running inside a VM, the Guest API is also available as an MCP server: `ovm-mcp-guest`.
 
 This binary is pre-installed at `/usr/bin/ovm-mcp-guest` in every OmniVM VM. It communicates over stdio (JSON-RPC 2.0) and calls the Guest API on localhost:7777.
 
@@ -247,10 +247,6 @@ claude mcp add ovm /usr/bin/ovm-mcp-guest
 ```
 
 Claude will then have access to all 6 tools and can spawn child instances, monitor their state, and manage their lifecycle.
-
-### Registering with OpenClaw
-
-For OpenClaw agents, add the MCP server as a tool provider in the agent config. The exact configuration depends on OpenClaw's MCP tool integration — consult OpenClaw's documentation for registering external MCP servers.
 
 ### Example: Claude Spawning a Build Instance
 

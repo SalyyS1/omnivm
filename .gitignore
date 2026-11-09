@@ -5,10 +5,6 @@
 /ovm-harness
 /ovm-mcp
 /ovm-mcp-guest
-/ovm-vmm-worker
-/ovm-gateway
-/ovm-agent
-/ovm-ui
 
 # Base rootfs
 base/*.ext4
@@ -23,13 +19,6 @@ base/rootfs/
 *.test
 *.out
 vendor/
-
-# Frontend
-node_modules/
-ui/frontend/dist/
-
-# macOS
-.DS_Store
 
 # IDE
 .idea/

@@ -48,18 +48,8 @@ Searchable FAQ for common OmniVM issues. Each entry states the problem, explains
 **Fix:**
 1. Stop the daemon: `ovm down`
 2. Remove all data: `rm -rf ~/.omnivm/`
-3. This deletes: database, images, overlays, workspaces, master key, base rootfs.
-4. You will need to `make base-rootfs` again and re-set all secrets.
-
----
-
-## "ovm doctor says libkrun not found"
-
-**Fix:** Install via Homebrew:
-```
-brew tap slp/krun && brew install libkrun
-```
-The library must be at `/opt/homebrew/lib/libkrun.dylib` (Apple Silicon) or `/usr/local/lib/libkrun.dylib` (Intel).
+3. This deletes: database, images, overlays, workspaces, snapshots, logs, master key.
+4. You will need to re-set all secrets. The kernel at `~/.omnivm/kernel/vmlinux` is also removed; run `make kernel` again.
 
 ---
 
