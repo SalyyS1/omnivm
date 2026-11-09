@@ -35,3 +35,10 @@ ui/frontend/dist/
 .idea/
 .vscode/
 *.swp
+
+# Local agent/tooling files (never published)
+CLAUDE.md
+AGENTS.md
+.claude/
+.claude-terminal
+plans/
