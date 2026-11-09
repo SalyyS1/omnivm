@@ -1,12 +1,12 @@
-# Aegis Makefile (Linux / Cloud Hypervisor only)
-# Build aegisd, aegis CLI, guest harness, and MCP servers.
+# OmniVM Makefile (Linux / Cloud Hypervisor only)
+# Build ovmd, ovm CLI, guest harness, and MCP servers.
 
 SHELL := /bin/bash
 
 # Go settings
 GO := go
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-VERSION_PKG := github.com/xfeldman/aegisvm/internal/version
+VERSION_PKG := github.com/SalyyS1/omnivm/internal/version
 LDFLAGS := -X $(VERSION_PKG).version=$(VERSION)
 GOFLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
@@ -32,38 +32,38 @@ GUEST_ARCH := $(HOST_ARCH)
 CH_VERSION := v43.0
 CH_KERNEL_RELEASE := ch-release-v6.16.9-20251112
 
-ALL_TARGETS := aegisd aegis harness mcp mcp-guest
+ALL_TARGETS := ovmd ovm harness mcp mcp-guest
 
-.PHONY: all aegisd aegis harness mcp mcp-guest clean test test-unit integration test-linux cloud-hypervisor kernel kernel-build deb release-linux-tarball
+.PHONY: all ovmd ovm harness mcp mcp-guest clean test test-unit integration test-linux cloud-hypervisor kernel kernel-build deb release-linux-tarball
 
 all: $(ALL_TARGETS)
 
-# aegisd — the host daemon
-aegisd:
+# ovmd — the host daemon
+ovmd:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/aegisd ./cmd/aegisd
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/ovmd ./cmd/ovmd
 
-# aegis — the CLI
-aegis:
+# ovm — the CLI
+ovm:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/aegis ./cmd/aegis
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/ovm ./cmd/ovm
 
-# aegis-harness — guest PID 1 (static Linux binary)
+# ovm-harness — guest PID 1 (static Linux binary)
 harness:
 	@mkdir -p $(BIN_DIR)
 	GOOS=$(GUEST_OS) GOARCH=$(GUEST_ARCH) CGO_ENABLED=0 \
-		$(GO) build $(GOFLAGS) -o $(BIN_DIR)/aegis-harness ./cmd/aegis-harness
+		$(GO) build $(GOFLAGS) -o $(BIN_DIR)/ovm-harness ./cmd/ovm-harness
 
-# aegis-mcp — MCP server for LLM integration (host-side)
+# ovm-mcp — MCP server for LLM integration (host-side)
 mcp:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/aegis-mcp ./cmd/aegis-mcp
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BIN_DIR)/ovm-mcp ./cmd/ovm-mcp
 
-# aegis-mcp-guest — MCP server for programs inside VMs (guest-side)
+# ovm-mcp-guest — MCP server for programs inside VMs (guest-side)
 mcp-guest:
 	@mkdir -p $(BIN_DIR)
 	GOOS=$(GUEST_OS) GOARCH=$(GUEST_ARCH) CGO_ENABLED=0 \
-		$(GO) build $(GOFLAGS) -o $(BIN_DIR)/aegis-mcp-guest ./cmd/aegis-mcp-guest
+		$(GO) build $(GOFLAGS) -o $(BIN_DIR)/ovm-mcp-guest ./cmd/ovm-mcp-guest
 
 # Download Cloud Hypervisor static binary
 cloud-hypervisor:
@@ -87,33 +87,33 @@ endif
 # The CH project maintains kernels with virtiofs, vsock, and virtio-net built-in
 # for x86_64 and arm64. Use `make kernel-build` to compile from source instead.
 kernel:
-	@mkdir -p $(HOME)/.aegis/kernel
-	@if [ -f $(HOME)/.aegis/kernel/vmlinux ]; then \
-		echo "Kernel already exists at $(HOME)/.aegis/kernel/vmlinux"; \
+	@mkdir -p $(HOME)/.omnivm/kernel
+	@if [ -f $(HOME)/.omnivm/kernel/vmlinux ]; then \
+		echo "Kernel already exists at $(HOME)/.omnivm/kernel/vmlinux"; \
 		echo "Delete it and re-run to re-download"; \
 	else \
 		echo "==> Downloading Cloud Hypervisor kernel $(CH_KERNEL_RELEASE) ($(HOST_ARCH))..." && \
 		case $(HOST_ARCH) in \
 			amd64) \
-				curl -fsSL -o $(HOME)/.aegis/kernel/vmlinux \
+				curl -fsSL -o $(HOME)/.omnivm/kernel/vmlinux \
 					"https://github.com/cloud-hypervisor/linux/releases/download/$(CH_KERNEL_RELEASE)/vmlinux-x86_64" ;; \
 			arm64) \
-				curl -fsSL -o $(HOME)/.aegis/kernel/vmlinux \
+				curl -fsSL -o $(HOME)/.omnivm/kernel/vmlinux \
 					"https://github.com/cloud-hypervisor/linux/releases/download/$(CH_KERNEL_RELEASE)/Image-arm64" ;; \
 			*) \
 				echo "No prebuilt kernel for $(HOST_ARCH). Use 'make kernel-build' to compile from source."; \
 				exit 1 ;; \
 		esac && \
-		echo "==> Kernel installed to $(HOME)/.aegis/kernel/vmlinux"; \
+		echo "==> Kernel installed to $(HOME)/.omnivm/kernel/vmlinux"; \
 	fi
 
 # Build microVM kernel from source (fallback for unsupported archs).
 # Uses Cloud Hypervisor's kernel branch with ch_defconfig (virtiofs + vsock built-in).
 # Requires: build-essential flex bison libelf-dev libssl-dev bc
 kernel-build:
-	@mkdir -p $(HOME)/.aegis/kernel
-	@if [ -f $(HOME)/.aegis/kernel/vmlinux ]; then \
-		echo "Kernel already exists at $(HOME)/.aegis/kernel/vmlinux"; \
+	@mkdir -p $(HOME)/.omnivm/kernel
+	@if [ -f $(HOME)/.omnivm/kernel/vmlinux ]; then \
+		echo "Kernel already exists at $(HOME)/.omnivm/kernel/vmlinux"; \
 		echo "Delete it and re-run to rebuild"; \
 	else \
 		TMPDIR=$$(mktemp -d) && \
@@ -124,9 +124,9 @@ kernel-build:
 		$(MAKE) -C $$TMPDIR ch_defconfig && \
 		echo "==> Building vmlinux (this may take ~10 minutes)..." && \
 		$(MAKE) -C $$TMPDIR -j$$(nproc) vmlinux && \
-		cp $$TMPDIR/vmlinux $(HOME)/.aegis/kernel/vmlinux && \
+		cp $$TMPDIR/vmlinux $(HOME)/.omnivm/kernel/vmlinux && \
 		rm -rf $$TMPDIR && \
-		echo "==> Kernel installed to $(HOME)/.aegis/kernel/vmlinux"; \
+		echo "==> Kernel installed to $(HOME)/.omnivm/kernel/vmlinux"; \
 	fi
 
 # Run unit tests
@@ -157,22 +157,22 @@ endif
 # Linux .deb package
 # Requires: cloud-hypervisor downloaded (make cloud-hypervisor) and kernel (make kernel).
 deb: $(ALL_TARGETS)
-	$(MAKE) -C debian aegisvm \
+	$(MAKE) -C debian omnivm \
 		VERSION=$(VERSION) ARCH=$(HOST_ARCH) BIN_DIR=../$(BIN_DIR)
 
 # Linux release tarball (alternative to .deb for non-apt users)
 release-linux-tarball: $(ALL_TARGETS)
-	@mkdir -p /tmp/aegisvm-tarball-staging/{bin,lib,share/kernel}
-	cp $(BIN_DIR)/aegis $(BIN_DIR)/aegisd $(BIN_DIR)/aegis-mcp \
-		/tmp/aegisvm-tarball-staging/bin/
-	cp $(BIN_DIR)/aegis-harness $(BIN_DIR)/aegis-mcp-guest \
+	@mkdir -p /tmp/omnivm-tarball-staging/{bin,lib,share/kernel}
+	cp $(BIN_DIR)/ovm $(BIN_DIR)/ovmd $(BIN_DIR)/ovm-mcp \
+		/tmp/omnivm-tarball-staging/bin/
+	cp $(BIN_DIR)/ovm-harness $(BIN_DIR)/ovm-mcp-guest \
 		$(BIN_DIR)/cloud-hypervisor $(BIN_DIR)/ch-remote \
-		/tmp/aegisvm-tarball-staging/lib/
-	cp $(HOME)/.aegis/kernel/vmlinux /tmp/aegisvm-tarball-staging/share/kernel/
-	tar czf aegisvm-$(VERSION)-linux-$(HOST_ARCH).tar.gz \
-		-C /tmp/aegisvm-tarball-staging bin lib share
-	@rm -rf /tmp/aegisvm-tarball-staging
-	@echo "==> Built aegisvm-$(VERSION)-linux-$(HOST_ARCH).tar.gz"
+		/tmp/omnivm-tarball-staging/lib/
+	cp $(HOME)/.omnivm/kernel/vmlinux /tmp/omnivm-tarball-staging/share/kernel/
+	tar czf omnivm-$(VERSION)-linux-$(HOST_ARCH).tar.gz \
+		-C /tmp/omnivm-tarball-staging bin lib share
+	@rm -rf /tmp/omnivm-tarball-staging
+	@echo "==> Built omnivm-$(VERSION)-linux-$(HOST_ARCH).tar.gz"
 
 # Clean build artifacts
 clean:

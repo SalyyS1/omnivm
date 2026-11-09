@@ -11,7 +11,7 @@ func TestInjectHarness_Success(t *testing.T) {
 	harnessDir := t.TempDir()
 
 	// Create a fake harness binary
-	harnessBin := filepath.Join(harnessDir, "aegis-harness")
+	harnessBin := filepath.Join(harnessDir, "ovm-harness")
 	harnessContent := []byte("#!/bin/sh\necho harness\n")
 	if err := os.WriteFile(harnessBin, harnessContent, 0755); err != nil {
 		t.Fatalf("write harness binary: %v", err)
@@ -22,7 +22,7 @@ func TestInjectHarness_Success(t *testing.T) {
 	}
 
 	// Verify the harness was copied to the correct path
-	destPath := filepath.Join(rootfsDir, "usr", "bin", "aegis-harness")
+	destPath := filepath.Join(rootfsDir, "usr", "bin", "ovm-harness")
 	data, err := os.ReadFile(destPath)
 	if err != nil {
 		t.Fatalf("read injected harness: %v", err)
@@ -46,7 +46,7 @@ func TestInjectHarness_CreatesDirectories(t *testing.T) {
 	harnessDir := t.TempDir()
 
 	// Create a fake harness binary
-	harnessBin := filepath.Join(harnessDir, "aegis-harness")
+	harnessBin := filepath.Join(harnessDir, "ovm-harness")
 	if err := os.WriteFile(harnessBin, []byte("binary"), 0755); err != nil {
 		t.Fatalf("write harness binary: %v", err)
 	}
@@ -75,13 +75,13 @@ func TestInjectHarness_OverwritesExisting(t *testing.T) {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	destPath := filepath.Join(destDir, "aegis-harness")
+	destPath := filepath.Join(destDir, "ovm-harness")
 	if err := os.WriteFile(destPath, []byte("old-binary"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a new harness binary
-	harnessBin := filepath.Join(harnessDir, "aegis-harness")
+	harnessBin := filepath.Join(harnessDir, "ovm-harness")
 	newContent := []byte("new-binary-content")
 	if err := os.WriteFile(harnessBin, newContent, 0755); err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestInjectHarness_OverwritesExisting(t *testing.T) {
 func TestInjectHarness_SourceNotFound(t *testing.T) {
 	rootfsDir := t.TempDir()
 
-	err := InjectHarness(rootfsDir, "/nonexistent/path/aegis-harness")
+	err := InjectHarness(rootfsDir, "/nonexistent/path/ovm-harness")
 	if err == nil {
 		t.Fatal("expected error for missing source binary, got nil")
 	}
@@ -114,7 +114,7 @@ func TestInjectHarness_LargeFile(t *testing.T) {
 	harnessDir := t.TempDir()
 
 	// Create a larger fake binary (1 MB) to test copy correctness
-	harnessBin := filepath.Join(harnessDir, "aegis-harness")
+	harnessBin := filepath.Join(harnessDir, "ovm-harness")
 	largeContent := make([]byte, 1024*1024)
 	for i := range largeContent {
 		largeContent[i] = byte(i % 256)
@@ -127,7 +127,7 @@ func TestInjectHarness_LargeFile(t *testing.T) {
 		t.Fatalf("InjectHarness: %v", err)
 	}
 
-	destPath := filepath.Join(rootfsDir, "usr", "bin", "aegis-harness")
+	destPath := filepath.Join(rootfsDir, "usr", "bin", "ovm-harness")
 	data, err := os.ReadFile(destPath)
 	if err != nil {
 		t.Fatalf("read injected harness: %v", err)

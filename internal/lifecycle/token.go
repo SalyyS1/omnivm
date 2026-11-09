@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/secrets"
 )
 
 // CapabilityToken defines what a guest instance is allowed to do.

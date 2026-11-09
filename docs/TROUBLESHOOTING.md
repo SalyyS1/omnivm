@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Searchable FAQ for common Aegis issues. Each entry states the problem, explains why it happens, and provides a fix.
+Searchable FAQ for common OmniVM issues. Each entry states the problem, explains why it happens, and provides a fix.
 
 ---
 
@@ -16,7 +16,7 @@ Searchable FAQ for common Aegis issues. Each entry states the problem, explains 
 
 **Why:** The VM has its own network namespace. `localhost` inside the VM is not the host.
 
-**Fix:** All ingress goes through the Aegis router at `127.0.0.1:8099`. Use `curl http://127.0.0.1:8099/` to reach your instance, or `curl http://127.0.0.1:8099/myhandle/` for multi-instance routing.
+**Fix:** All ingress goes through the OmniVM router at `127.0.0.1:8099`. Use `curl http://127.0.0.1:8099/` to reach your instance, or `curl http://127.0.0.1:8099/myhandle/` for multi-instance routing.
 
 ---
 
@@ -25,11 +25,11 @@ Searchable FAQ for common Aegis issues. Each entry states the problem, explains 
 **Why:** Log routing depends on how the workload was started.
 
 **Fix:**
-- `aegis run`: logs stream to your terminal automatically.
-- `aegis logs <handle>`: stream logs for a running instance.
-- `aegis logs <handle> --follow`: stream live logs.
-- Instance logs are persisted at `~/.aegis/data/logs/<instance-id>.ndjson`.
-- Daemon logs: check the terminal where `aegisd` is running, or the output of `aegis up`.
+- `ovm run`: logs stream to your terminal automatically.
+- `ovm logs <handle>`: stream logs for a running instance.
+- `ovm logs <handle> --follow`: stream live logs.
+- Instance logs are persisted at `~/.omnivm/data/logs/<instance-id>.ndjson`.
+- Daemon logs: check the terminal where `ovmd` is running, or the output of `ovm up`.
 
 ---
 
@@ -38,22 +38,22 @@ Searchable FAQ for common Aegis issues. Each entry states the problem, explains 
 **Why:** Secrets are injected at instance boot time. If you set a secret after starting an instance, the running instance doesn't get it.
 
 **Fix:**
-- Disable and restart the instance to pick up new secrets: `aegis instance disable <name>` then `aegis instance start --name <name>`.
-- Check secrets exist: `aegis secret list`
+- Disable and restart the instance to pick up new secrets: `ovm instance disable <name>` then `ovm instance start --name <name>`.
+- Check secrets exist: `ovm secret list`
 
 ---
 
-## "How do I reset all Aegis state?"
+## "How do I reset all OmniVM state?"
 
 **Fix:**
-1. Stop the daemon: `aegis down`
-2. Remove all data: `rm -rf ~/.aegis/`
+1. Stop the daemon: `ovm down`
+2. Remove all data: `rm -rf ~/.omnivm/`
 3. This deletes: database, images, overlays, workspaces, master key, base rootfs.
 4. You will need to `make base-rootfs` again and re-set all secrets.
 
 ---
 
-## "aegis doctor says libkrun not found"
+## "ovm doctor says libkrun not found"
 
 **Fix:** Install via Homebrew:
 ```
@@ -73,10 +73,10 @@ The library must be at `/opt/homebrew/lib/libkrun.dylib` (Apple Silicon) or `/us
 
 ---
 
-## "aegis run hangs / never returns"
+## "ovm run hangs / never returns"
 
 **Fix:**
-- If the daemon is not running, start it first: `aegis up`.
+- If the daemon is not running, start it first: `ovm up`.
 - Check daemon logs for errors.
 - The process may be long-running. Use Ctrl+C to stop and clean up.
 
@@ -87,7 +87,7 @@ The library must be at `/opt/homebrew/lib/libkrun.dylib` (Apple Silicon) or `/us
 **Why:** The master key encrypts all secrets. Without it, stored secrets are undecryptable.
 
 **Fix:**
-- Re-set all secrets via `aegis secret set`.
+- Re-set all secrets via `ovm secret set`.
 - A new master key is auto-generated on next daemon start.
 
 ---
@@ -98,12 +98,12 @@ The library must be at `/opt/homebrew/lib/libkrun.dylib` (Apple Silicon) or `/us
 
 **Fix:** Use explicit routing:
 - Path routing: `curl http://127.0.0.1:8099/myhandle/`
-- Header routing: `curl -H "X-Aegis-Instance: inst-id" http://127.0.0.1:8099/`
+- Header routing: `curl -H "X-OmniVM-Instance: inst-id" http://127.0.0.1:8099/`
 
 ---
 
 ## "Workspace directory is empty on host"
 
 **Fix:**
-- Workspaces are at `~/.aegis/data/workspaces/`.
+- Workspaces are at `~/.omnivm/data/workspaces/`.
 - A workspace is only created when `--workspace` is specified at instance creation.

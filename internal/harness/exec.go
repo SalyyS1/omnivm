@@ -90,7 +90,7 @@ func startPrimaryProcess(ctx context.Context, params runParams, conn net.Conn, t
 			}
 		}
 		// Check restart flag BEFORE notifying daemon. If we send processExited
-		// first, aegisd stops the VM and the restart can never happen.
+		// first, ovmd stops the VM and the restart can never happen.
 		shouldRestart := false
 		if tracker != nil {
 			tracker.mu.Lock()

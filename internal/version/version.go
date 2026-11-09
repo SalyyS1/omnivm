@@ -2,7 +2,7 @@
 //
 // Build with:
 //
-//	go build -ldflags "-X github.com/xfeldman/aegisvm/internal/version.version=v0.2.0"
+//	go build -ldflags "-X github.com/SalyyS1/omnivm/internal/version.version=v0.2.0"
 package version
 
 // version is set at build time via -ldflags.

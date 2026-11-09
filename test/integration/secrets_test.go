@@ -13,8 +13,8 @@ import (
 // verifies the secret is available inside the VM via env.
 func TestDynamicSecrets_CreateWithSecret(t *testing.T) {
 	// Seed a secret
-	aegisRun(t, "secret", "set", "TEST_SECRET", "hello-from-secret")
-	t.Cleanup(func() { aegis("secret", "delete", "TEST_SECRET") })
+	ovmRun(t, "secret", "set", "TEST_SECRET", "hello-from-secret")
+	t.Cleanup(func() { ovm("secret", "delete", "TEST_SECRET") })
 
 	// Create instance with the secret
 	inst := apiPost(t, "/v1/instances", map[string]interface{}{
@@ -30,7 +30,7 @@ func TestDynamicSecrets_CreateWithSecret(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Exec inside and check env
-	out := aegisRun(t, "exec", "secret-test", "--", "sh", "-c", "echo $TEST_SECRET")
+	out := ovmRun(t, "exec", "secret-test", "--", "sh", "-c", "echo $TEST_SECRET")
 	if !strings.Contains(out, "hello-from-secret") {
 		t.Fatalf("expected 'hello-from-secret' in exec output, got: %s", out)
 	}
@@ -40,8 +40,8 @@ func TestDynamicSecrets_CreateWithSecret(t *testing.T) {
 // and restarting the instance picks up the new value.
 func TestDynamicSecrets_RotateAndRestart(t *testing.T) {
 	// Seed initial secret
-	aegisRun(t, "secret", "set", "ROTATE_KEY", "value-v1")
-	t.Cleanup(func() { aegis("secret", "delete", "ROTATE_KEY") })
+	ovmRun(t, "secret", "set", "ROTATE_KEY", "value-v1")
+	t.Cleanup(func() { ovm("secret", "delete", "ROTATE_KEY") })
 
 	// Create instance
 	inst := apiPost(t, "/v1/instances", map[string]interface{}{
@@ -56,13 +56,13 @@ func TestDynamicSecrets_RotateAndRestart(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Verify initial value
-	out := aegisRun(t, "exec", "rotate-test", "--", "sh", "-c", "echo $ROTATE_KEY")
+	out := ovmRun(t, "exec", "rotate-test", "--", "sh", "-c", "echo $ROTATE_KEY")
 	if !strings.Contains(out, "value-v1") {
 		t.Fatalf("expected 'value-v1', got: %s", out)
 	}
 
 	// Rotate the secret
-	aegisRun(t, "secret", "set", "ROTATE_KEY", "value-v2")
+	ovmRun(t, "secret", "set", "ROTATE_KEY", "value-v2")
 
 	// Disable and re-enable (restart)
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/disable", id), nil)
@@ -72,7 +72,7 @@ func TestDynamicSecrets_RotateAndRestart(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Verify rotated value
-	out = aegisRun(t, "exec", "rotate-test", "--", "sh", "-c", "echo $ROTATE_KEY")
+	out = ovmRun(t, "exec", "rotate-test", "--", "sh", "-c", "echo $ROTATE_KEY")
 	if !strings.Contains(out, "value-v2") {
 		t.Fatalf("expected 'value-v2' after rotation, got: %s", out)
 	}
@@ -82,11 +82,11 @@ func TestDynamicSecrets_RotateAndRestart(t *testing.T) {
 // to an instance after creation via PUT /secrets endpoint.
 func TestDynamicSecrets_AddAfterCreation(t *testing.T) {
 	// Seed secrets
-	aegisRun(t, "secret", "set", "KEY_A", "alpha")
-	aegisRun(t, "secret", "set", "KEY_B", "bravo")
+	ovmRun(t, "secret", "set", "KEY_A", "alpha")
+	ovmRun(t, "secret", "set", "KEY_B", "bravo")
 	t.Cleanup(func() {
-		aegis("secret", "delete", "KEY_A")
-		aegis("secret", "delete", "KEY_B")
+		ovm("secret", "delete", "KEY_A")
+		ovm("secret", "delete", "KEY_B")
 	})
 
 	// Create instance with only KEY_A
@@ -102,7 +102,7 @@ func TestDynamicSecrets_AddAfterCreation(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Verify KEY_A is present, KEY_B is not
-	out := aegisRun(t, "exec", "add-secret-test", "--", "sh", "-c", "echo A=$KEY_A B=$KEY_B")
+	out := ovmRun(t, "exec", "add-secret-test", "--", "sh", "-c", "echo A=$KEY_A B=$KEY_B")
 	if !strings.Contains(out, "A=alpha") {
 		t.Fatalf("expected 'A=alpha', got: %s", out)
 	}
@@ -130,7 +130,7 @@ func TestDynamicSecrets_AddAfterCreation(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Verify both secrets are present
-	out = aegisRun(t, "exec", "add-secret-test", "--", "sh", "-c", "echo A=$KEY_A B=$KEY_B")
+	out = ovmRun(t, "exec", "add-secret-test", "--", "sh", "-c", "echo A=$KEY_A B=$KEY_B")
 	if !strings.Contains(out, "A=alpha") || !strings.Contains(out, "B=bravo") {
 		t.Fatalf("expected both secrets after restart, got: %s", out)
 	}
@@ -139,8 +139,8 @@ func TestDynamicSecrets_AddAfterCreation(t *testing.T) {
 // TestDynamicSecrets_SecretKeysInInstanceInfo verifies the secret_keys field
 // appears in instance info API responses.
 func TestDynamicSecrets_SecretKeysInInstanceInfo(t *testing.T) {
-	aegisRun(t, "secret", "set", "INFO_KEY", "test")
-	t.Cleanup(func() { aegis("secret", "delete", "INFO_KEY") })
+	ovmRun(t, "secret", "set", "INFO_KEY", "test")
+	t.Cleanup(func() { ovm("secret", "delete", "INFO_KEY") })
 
 	inst := apiPost(t, "/v1/instances", map[string]interface{}{
 		"command":   []string{"sh", "-c", "sleep 600"},
@@ -164,17 +164,17 @@ func TestDynamicSecrets_SecretKeysInInstanceInfo(t *testing.T) {
 // TestDynamicSecrets_CLIRestartMergesSecrets verifies that restarting via CLI
 // with --secret additively merges new secret keys.
 func TestDynamicSecrets_CLIRestartMergesSecrets(t *testing.T) {
-	aegisRun(t, "secret", "set", "MERGE_A", "aaa")
-	aegisRun(t, "secret", "set", "MERGE_B", "bbb")
+	ovmRun(t, "secret", "set", "MERGE_A", "aaa")
+	ovmRun(t, "secret", "set", "MERGE_B", "bbb")
 	t.Cleanup(func() {
-		aegis("secret", "delete", "MERGE_A")
-		aegis("secret", "delete", "MERGE_B")
+		ovm("secret", "delete", "MERGE_A")
+		ovm("secret", "delete", "MERGE_B")
 	})
 
 	// Create with MERGE_A only
-	out := aegisRun(t, "instance", "start", "--name", "merge-test", "--secret", "MERGE_A", "--", "sh", "-c", "sleep 600")
+	out := ovmRun(t, "instance", "start", "--name", "merge-test", "--secret", "MERGE_A", "--", "sh", "-c", "sleep 600")
 	_ = out
-	t.Cleanup(func() { aegis("instance", "delete", "merge-test") })
+	t.Cleanup(func() { ovm("instance", "delete", "merge-test") })
 
 	waitForState(t, "merge-test", "running", 60*time.Second)
 
@@ -183,11 +183,11 @@ func TestDynamicSecrets_CLIRestartMergesSecrets(t *testing.T) {
 	waitForState(t, "merge-test", "stopped", 30*time.Second)
 
 	// Restart with additional --secret MERGE_B (CLI restart path)
-	aegisRun(t, "instance", "start", "--name", "merge-test", "--secret", "MERGE_B")
+	ovmRun(t, "instance", "start", "--name", "merge-test", "--secret", "MERGE_B")
 	waitForState(t, "merge-test", "running", 60*time.Second)
 
 	// Check that both secrets are present
-	out = aegisRun(t, "exec", "merge-test", "--", "sh", "-c", "echo A=$MERGE_A B=$MERGE_B")
+	out = ovmRun(t, "exec", "merge-test", "--", "sh", "-c", "echo A=$MERGE_A B=$MERGE_B")
 	if !strings.Contains(out, "A=aaa") || !strings.Contains(out, "B=bbb") {
 		t.Fatalf("expected both merged secrets, got: %s", out)
 	}

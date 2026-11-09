@@ -20,8 +20,8 @@ tether_send(instance="my-agent", text="Analyze the data in /workspace/data.csv")
 # Returns: {msg_id, session_id, ingress_seq}
 
 # Via API
-curl -X POST --unix-socket ~/.aegis/aegisd.sock \
-  http://aegis/v1/instances/my-agent/tether \
+curl -X POST --unix-socket ~/.omnivm/ovmd.sock \
+  http://ovm/v1/instances/my-agent/tether \
   -H 'Content-Type: application/json' \
   -d '{"v":1,"type":"user.message","session":{"channel":"host","id":"default"},"payload":{"text":"Analyze the data"}}'
 ```
@@ -34,8 +34,8 @@ tether_read(instance="my-agent", after_seq=1, wait_ms=10000)
 # Returns: {frames: [...], next_seq, timed_out}
 
 # Via API
-curl --unix-socket ~/.aegis/aegisd.sock \
-  "http://aegis/v1/instances/my-agent/tether/poll?channel=host&session_id=default&after_seq=1&wait_ms=10000"
+curl --unix-socket ~/.omnivm/ovmd.sock \
+  "http://ovm/v1/instances/my-agent/tether/poll?channel=host&session_id=default&after_seq=1&wait_ms=10000"
 ```
 
 ### Typical pattern (Claude calling in a loop)
@@ -150,15 +150,15 @@ Use `after_seq` + `next_seq` for reliable cursor-based reading. No missed frames
 
 ## How it works inside the VM
 
-The guest agent (`aegis-agent`) handles tether frames automatically. When a `user.message` frame arrives:
+The guest agent (`ovm-agent`) handles tether frames automatically. When a `user.message` frame arrives:
 
 1. Harness receives the frame via the control channel (vsock JSON-RPC)
 2. Harness forwards it to the agent process on `127.0.0.1:7778`
 3. Agent routes the message to the correct session (`channel:session_id`)
 4. Agent processes the message (LLM call if API key present, fallback otherwise)
 5. Agent emits `status.presence`, `assistant.delta`, and `assistant.done` frames back through the harness
-6. Harness sends them to aegisd via the control channel
-7. aegisd stores them in the tether store (with `seq` assigned)
+6. Harness sends them to ovmd via the control channel
+7. ovmd stores them in the tether store (with `seq` assigned)
 
 Both ingress (`user.message`) and egress frames are stored in the tether ring buffer. This gives all clients — desktop app, browser UI, MCP — a complete conversation history via the poll endpoint.
 

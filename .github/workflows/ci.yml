@@ -29,10 +29,10 @@ jobs:
         run: make test
 
       - name: Verify version is set
-        run: ./bin/aegis version
+        run: ./bin/ovm version
 
       - name: Verify MCP handshake
         run: |
           echo '{"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{}},"id":1}' \
-            | ./bin/aegis-mcp \
-            | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; assert r['serverInfo']['name']=='aegisvm', 'bad name'; assert 'tools' in r['capabilities'], 'no tools'; print('MCP handshake OK')"
+            | ./bin/ovm-mcp \
+            | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; assert r['serverInfo']['name']=='omnivm', 'bad name'; assert 'tools' in r['capabilities'], 'no tools'; print('MCP handshake OK')"

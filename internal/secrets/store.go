@@ -1,5 +1,5 @@
 // Package secrets provides AES-256-GCM encryption for secret values.
-// The master key is stored at a configurable path (default ~/.aegis/master.key)
+// The master key is stored at a configurable path (default ~/.omnivm/master.key)
 // and auto-generated on first use.
 package secrets
 

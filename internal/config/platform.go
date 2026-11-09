@@ -30,7 +30,7 @@ func DetectPlatform() (*Platform, error) {
 		p.NeedsRoot = true // tap + iptables networking
 	default:
 		return nil, fmt.Errorf(
-			"unsupported platform: %s/%s. Aegis requires Linux with KVM (Cloud Hypervisor)",
+			"unsupported platform: %s/%s. OmniVM requires Linux with KVM (Cloud Hypervisor)",
 			p.OS, p.Arch,
 		)
 	}

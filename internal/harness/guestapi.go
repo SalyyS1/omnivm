@@ -152,7 +152,7 @@ func handleGuestKeepaliveRelease(w http.ResponseWriter, r *http.Request, hrpc *h
 	fmt.Fprintf(w, `{"ok":true}`)
 }
 
-// handleGuestTetherSend forwards a tether frame from the agent runtime to aegisd.
+// handleGuestTetherSend forwards a tether frame from the agent runtime to ovmd.
 func handleGuestTetherSend(w http.ResponseWriter, r *http.Request, hrpc *harnessRPC) {
 	var frame json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&frame); err != nil {
@@ -160,7 +160,7 @@ func handleGuestTetherSend(w http.ResponseWriter, r *http.Request, hrpc *harness
 		return
 	}
 
-	// Send as a tether.frame notification to aegisd (no response expected)
+	// Send as a tether.frame notification to ovmd (no response expected)
 	if err := sendNotification(hrpc.conn, "tether.frame", frame); err != nil {
 		writeGuestError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -170,7 +170,7 @@ func handleGuestTetherSend(w http.ResponseWriter, r *http.Request, hrpc *harness
 	fmt.Fprintf(w, `{"ok":true}`)
 }
 
-// handleGuestLLMChat proxies an LLM chat request to aegisd.
+// handleGuestLLMChat proxies an LLM chat request to ovmd.
 func handleGuestLLMChat(w http.ResponseWriter, r *http.Request, hrpc *harnessRPC) {
 	var body json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -273,15 +273,15 @@ func writeGuestError(w http.ResponseWriter, code int, message string) {
 	})
 }
 
-// injectGuestAPIEnv adds AEGIS_GUEST_API and AEGIS_INSTANCE_ID to the environment
+// injectGuestAPIEnv adds OVM_GUEST_API and OVM_INSTANCE_ID to the environment
 // if the guest API is available (capability token received).
 func injectGuestAPIEnv(env []string, hrpc *harnessRPC) []string {
-	env = append(env, "AEGIS_GUEST_API=http://"+guestAPIAddr)
-	instanceID := os.Getenv("AEGIS_INSTANCE_ID")
+	env = append(env, "OVM_GUEST_API=http://"+guestAPIAddr)
+	instanceID := os.Getenv("OVM_INSTANCE_ID")
 	if instanceID == "" {
 		instanceID = "unknown"
 	}
-	env = append(env, "AEGIS_INSTANCE_ID="+instanceID)
+	env = append(env, "OVM_INSTANCE_ID="+instanceID)
 	return env
 }
 

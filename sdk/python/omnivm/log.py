@@ -1,4 +1,4 @@
-"""Structured JSON logging to stdout/stderr for Aegis agents.
+"""Structured JSON logging to stdout/stderr for OmniVM agents.
 
 Each function emits exactly one JSON line.
 """

@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-// Config holds aegisd runtime configuration.
+// Config holds ovmd runtime configuration.
 type Config struct {
-	// DataDir is the base directory for aegis runtime data.
+	// DataDir is the base directory for ovm runtime data.
 	DataDir string
 
-	// BinDir is the directory containing aegis binaries.
+	// BinDir is the directory containing ovm binaries.
 	BinDir string
 
-	// SocketPath is the unix socket path for the aegisd API.
+	// SocketPath is the unix socket path for the ovmd API.
 	SocketPath string
 
 	// DefaultMemoryMB is the default VM memory in megabytes.
@@ -70,31 +70,31 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
-	aegisDir := filepath.Join(homeDir, ".aegis")
+	ovmDir := filepath.Join(homeDir, ".omnivm")
 	execDir := executableDir()
 
 	// Kernel path: prefer user-local, fall back to system package path
-	kernelPath := filepath.Join(aegisDir, "kernel", "vmlinux")
+	kernelPath := filepath.Join(ovmDir, "kernel", "vmlinux")
 	if _, err := os.Stat(kernelPath); err != nil {
-		sysKernel := "/usr/share/aegisvm/kernel/vmlinux"
+		sysKernel := "/usr/share/omnivm/kernel/vmlinux"
 		if _, err := os.Stat(sysKernel); err == nil {
 			kernelPath = sysKernel
 		}
 	}
 
 	return &Config{
-		DataDir:         filepath.Join(aegisDir, "data"),
+		DataDir:         filepath.Join(ovmDir, "data"),
 		BinDir:          execDir,
-		SocketPath:      filepath.Join(aegisDir, "aegisd.sock"),
+		SocketPath:      filepath.Join(ovmDir, "ovmd.sock"),
 		DefaultMemoryMB: 512,
 		DefaultVCPUs:    1,
 		RouterAddr:      "127.0.0.1:8099",
-		DBPath:          filepath.Join(aegisDir, "data", "aegis.db"),
-		ImageCacheDir:   filepath.Join(aegisDir, "data", "images"),
-		OverlaysDir:     filepath.Join(aegisDir, "data", "overlays"),
-		WorkspacesDir:   filepath.Join(aegisDir, "data", "workspaces"),
-		LogsDir:         filepath.Join(aegisDir, "data", "logs"),
-		MasterKeyPath:   filepath.Join(aegisDir, "master.key"),
+		DBPath:          filepath.Join(ovmDir, "data", "ovm.db"),
+		ImageCacheDir:   filepath.Join(ovmDir, "data", "images"),
+		OverlaysDir:     filepath.Join(ovmDir, "data", "overlays"),
+		WorkspacesDir:   filepath.Join(ovmDir, "data", "workspaces"),
+		LogsDir:         filepath.Join(ovmDir, "data", "logs"),
+		MasterKeyPath:   filepath.Join(ovmDir, "master.key"),
 		PauseAfterIdle:  60 * time.Second,
 		StopAfterIdle:   5 * time.Minute,
 		NetworkBackend:  "auto",
@@ -145,8 +145,8 @@ func (c *Config) ResolveBinaries() {
 //  2. PATH (exec.LookPath)
 //  3. Known system paths (deb/rpm installs)
 //
-// BinDir is checked first so dev builds (./bin/aegisd) always find freshly
-// built siblings (./bin/aegis-harness) instead of stale system-installed copies.
+// BinDir is checked first so dev builds (./bin/ovmd) always find freshly
+// built siblings (./bin/ovm-harness) instead of stale system-installed copies.
 //
 // Returns the absolute path, or "" if not found.
 func FindBinary(name string, binDir string) string {
@@ -165,7 +165,7 @@ func FindBinary(name string, binDir string) string {
 	}
 
 	// 3. Known system paths
-	for _, dir := range []string{"/usr/lib/aegisvm", "/usr/libexec", "/usr/local/bin"} {
+	for _, dir := range []string{"/usr/lib/omnivm", "/usr/libexec", "/usr/local/bin"} {
 		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
 			return p

@@ -1,4 +1,4 @@
-// Package registry provides persistent storage for aegis instance state.
+// Package registry provides persistent storage for ovm instance state.
 // Uses pure-Go SQLite (modernc.org/sqlite) — no cgo required.
 package registry
 
@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// DB wraps an SQLite database for aegis registry storage.
+// DB wraps an SQLite database for ovm registry storage.
 type DB struct {
 	db *sql.DB
 }

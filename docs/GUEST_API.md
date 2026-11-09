@@ -1,6 +1,6 @@
 # Guest Orchestration API
 
-The Guest API allows processes running inside an Aegis VM to spawn and manage other Aegis instances. This enables patterns like a Telegram bot spawning work instances for heavy tasks.
+The Guest API allows processes running inside an OmniVM VM to spawn and manage other OmniVM instances. This enables patterns like a Telegram bot spawning work instances for heavy tasks.
 
 ## Quick Start
 
@@ -30,15 +30,15 @@ Available inside every VM:
 
 | Variable | Description |
 |----------|-------------|
-| `AEGIS_GUEST_API` | Guest API URL (always `http://127.0.0.1:7777`) |
-| `AEGIS_INSTANCE_ID` | This instance's ID |
+| `OVM_GUEST_API` | Guest API URL (always `http://127.0.0.1:7777`) |
+| `OVM_INSTANCE_ID` | This instance's ID |
 
 ## Prerequisites: Capabilities
 
 An instance can only spawn children if it was created with `capabilities`:
 
 ```bash
-curl -s --unix-socket ~/.aegis/aegisd.sock -X POST http://aegis/v1/instances \
+curl -s --unix-socket ~/.omnivm/ovmd.sock -X POST http://ovm/v1/instances \
   -H "Content-Type: application/json" \
   -d '{
     "handle": "my-bot",
@@ -155,7 +155,7 @@ Release the keepalive lease.
 
 - **No auth header needed** — the harness attaches the capability token automatically
 - **Token never exposed** — stays in harness memory, not in environment variables
-- **Host validates everything** — the harness forwards requests without checking; aegisd validates the token signature, capabilities, and resource ceilings
+- **Host validates everything** — the harness forwards requests without checking; ovmd validates the token signature, capabilities, and resource ceilings
 - **No escalation** — children inherit parent's caps (same or stricter)
 - **No upward visibility** — children can't see or manage the parent
 - **Cascade stop** — when a parent stops, all children are stopped automatically
@@ -175,12 +175,12 @@ Children are independent instances with their own idle/pause/stop lifecycle. The
 ## Example: Bot Spawning Work Instance
 
 ```javascript
-// Inside a Telegram bot running in Aegis
-const AEGIS_API = process.env.AEGIS_GUEST_API;
+// Inside a Telegram bot running in OmniVM
+const OVM_API = process.env.OVM_GUEST_API;
 
 async function handleBuildRequest(chatId, repoUrl) {
   // Spawn a work instance
-  const resp = await fetch(`${AEGIS_API}/v1/instances`, {
+  const resp = await fetch(`${OVM_API}/v1/instances`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -198,7 +198,7 @@ async function handleBuildRequest(chatId, repoUrl) {
   // Poll until done
   while (true) {
     await sleep(5000);
-    const info = await fetch(`${AEGIS_API}/v1/instances`).then(r => r.json());
+    const info = await fetch(`${OVM_API}/v1/instances`).then(r => r.json());
     const c = info.find(i => i.id === child.id);
     if (!c || c.state === 'stopped') {
       sendTelegram(chatId, 'Build complete!');
@@ -210,9 +210,9 @@ async function handleBuildRequest(chatId, repoUrl) {
 
 ## MCP Server for LLM Agents
 
-For LLM agents (Claude, OpenClaw, etc.) running inside a VM, the Guest API is also available as an MCP server: `aegis-mcp-guest`.
+For LLM agents (Claude, OpenClaw, etc.) running inside a VM, the Guest API is also available as an MCP server: `ovm-mcp-guest`.
 
-This binary is pre-installed at `/usr/bin/aegis-mcp-guest` in every Aegis VM. It communicates over stdio (JSON-RPC 2.0) and calls the Guest API on localhost:7777.
+This binary is pre-installed at `/usr/bin/ovm-mcp-guest` in every OmniVM VM. It communicates over stdio (JSON-RPC 2.0) and calls the Guest API on localhost:7777.
 
 ### Available MCP Tools
 
@@ -227,13 +227,13 @@ This binary is pre-installed at `/usr/bin/aegis-mcp-guest` in every Aegis VM. It
 
 ### Registering with Claude Code
 
-To use the Guest API from Claude Code running inside an Aegis VM, add the MCP server to your project's `.mcp.json`:
+To use the Guest API from Claude Code running inside an OmniVM VM, add the MCP server to your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "aegis": {
-      "command": "/usr/bin/aegis-mcp-guest",
+    "ovm": {
+      "command": "/usr/bin/ovm-mcp-guest",
       "args": []
     }
   }
@@ -243,7 +243,7 @@ To use the Guest API from Claude Code running inside an Aegis VM, add the MCP se
 Or register it via the CLI:
 
 ```bash
-claude mcp add aegis /usr/bin/aegis-mcp-guest
+claude mcp add ovm /usr/bin/ovm-mcp-guest
 ```
 
 Claude will then have access to all 6 tools and can spawn child instances, monitor their state, and manage their lifecycle.
@@ -254,7 +254,7 @@ For OpenClaw agents, add the MCP server as a tool provider in the agent config. 
 
 ### Example: Claude Spawning a Build Instance
 
-When Claude Code runs inside an Aegis VM with spawn capabilities, it can use the MCP tools directly:
+When Claude Code runs inside an OmniVM VM with spawn capabilities, it can use the MCP tools directly:
 
 ```
 User: Build and serve my React app at /workspace/my-app
@@ -272,4 +272,4 @@ It's running. The app will be available at the public port shown in the response
 
 ### Security Note
 
-`instance_list` only returns instances spawned by the calling VM — it does NOT show all Aegis instances. Each VM can only see and manage its own children. This prevents information leakage between unrelated instances.
+`instance_list` only returns instances spawned by the calling VM — it does NOT show all OmniVM instances. Each VM can only see and manage its own children. This prevents information leakage between unrelated instances.

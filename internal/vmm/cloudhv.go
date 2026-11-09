@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/config"
 )
 
 // CloudHypervisorVMM implements the VMM interface using Cloud Hypervisor on Linux.
@@ -51,7 +51,7 @@ type chInstance struct {
 	virtiofsdSocket string // virtiofsd socket path
 
 	// Networking
-	tapName string // tap device name (e.g. "aegis0")
+	tapName string // tap device name (e.g. "ovm0")
 	guestIP string // guest IP (e.g. "172.16.0.2")
 	hostIP  string // host-side tap IP (e.g. "172.16.0.1")
 
@@ -159,7 +159,7 @@ func (v *CloudHypervisorVMM) CreateVM(cfg VMConfig) (Handle, error) {
 	}
 	hostIP := fmt.Sprintf("172.16.%d.%d", thirdOctet, fourthBase+1)
 	guestIP := fmt.Sprintf("172.16.%d.%d", thirdOctet, fourthBase+2)
-	tapName := fmt.Sprintf("aegis%d", idx)
+	tapName := fmt.Sprintf("ovm%d", idx)
 
 	sockDir := filepath.Join(v.cfg.DataDir, "sockets")
 	inst := &chInstance{
@@ -279,18 +279,18 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 		"console=hvc0",
 		"root=/dev/vda",
 		"rw",
-		"init=/usr/bin/aegis-harness",
-		"AEGIS_VSOCK_PORT=" + strconv.Itoa(harnessVsockPort),
-		"AEGIS_VSOCK_CID=2",
-		fmt.Sprintf("AEGIS_NET_IP=%s/30", inst.guestIP),
-		fmt.Sprintf("AEGIS_NET_GW=%s", inst.hostIP),
-		"AEGIS_NET_DNS=8.8.8.8",
+		"init=/usr/bin/ovm-harness",
+		"OVM_VSOCK_PORT=" + strconv.Itoa(harnessVsockPort),
+		"OVM_VSOCK_CID=2",
+		fmt.Sprintf("OVM_NET_IP=%s/30", inst.guestIP),
+		fmt.Sprintf("OVM_NET_GW=%s", inst.hostIP),
+		"OVM_NET_DNS=8.8.8.8",
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/root",
 		"TERM=linux",
 	}
 	if cfg.WorkspacePath != "" {
-		cmdlineParts = append(cmdlineParts, "AEGIS_WORKSPACE=1")
+		cmdlineParts = append(cmdlineParts, "OVM_WORKSPACE=1")
 	}
 	cmdline := strings.Join(cmdlineParts, " ")
 
@@ -535,7 +535,7 @@ func (v *CloudHypervisorVMM) cleanupInstance(inst *chInstance) {
 
 // --- Networking helpers ---
 
-// cleanupOrphanedTaps removes any aegis* tap devices and their NAT rules
+// cleanupOrphanedTaps removes any ovm* tap devices and their NAT rules
 // left over from a previous daemon crash. Called once at startup.
 func cleanupOrphanedTaps() {
 	ifaces, err := net.Interfaces()
@@ -543,12 +543,12 @@ func cleanupOrphanedTaps() {
 		return
 	}
 	for _, iface := range ifaces {
-		if strings.HasPrefix(iface.Name, "aegis") {
+		if strings.HasPrefix(iface.Name, "ovm") {
 			log.Printf("vmm: cleaning up orphaned tap %s", iface.Name)
 			// Best-effort: remove NAT + FORWARD rules, then delete the tap.
 			// Derive the guest IP from the tap index (same allocation scheme as CreateVM).
 			var idx uint32
-			fmt.Sscanf(iface.Name, "aegis%d", &idx)
+			fmt.Sscanf(iface.Name, "ovm%d", &idx)
 			thirdOctet := idx / 64
 			fourthBase := (idx % 64) * 4
 			guestIP := fmt.Sprintf("172.16.%d.%d", thirdOctet, fourthBase+2)

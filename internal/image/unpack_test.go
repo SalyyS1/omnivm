@@ -76,7 +76,7 @@ func TestUnpack_RegularFiles(t *testing.T) {
 
 	layer := buildLayer(t, []tarEntry{
 		{typeflag: tar.TypeDir, name: "etc/", mode: 0755},
-		{typeflag: tar.TypeReg, name: "etc/hostname", content: "aegis-vm", mode: 0644},
+		{typeflag: tar.TypeReg, name: "etc/hostname", content: "ovm-vm", mode: 0644},
 		{typeflag: tar.TypeReg, name: "hello.txt", content: "world", mode: 0644},
 	})
 	img := buildImage(t, layer)
@@ -90,8 +90,8 @@ func TestUnpack_RegularFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read etc/hostname: %v", err)
 	}
-	if string(data) != "aegis-vm" {
-		t.Errorf("etc/hostname = %q, want %q", data, "aegis-vm")
+	if string(data) != "ovm-vm" {
+		t.Errorf("etc/hostname = %q, want %q", data, "ovm-vm")
 	}
 
 	data, err = os.ReadFile(filepath.Join(dest, "hello.txt"))
@@ -291,7 +291,7 @@ func TestUnpack_PathTraversalSkipped(t *testing.T) {
 	// A malicious layer with path traversal should be skipped.
 	// Use a unique filename so we don't collide with real system files
 	// (e.g. /etc/passwd exists on Linux, which would cause a false failure).
-	traversalFile := "../../../tmp/aegisvm-traversal-test-" + filepath.Base(dest)
+	traversalFile := "../../../tmp/omnivm-traversal-test-" + filepath.Base(dest)
 	layer := buildLayer(t, []tarEntry{
 		{typeflag: tar.TypeReg, name: traversalFile, content: "evil", mode: 0644},
 		{typeflag: tar.TypeReg, name: "safe.txt", content: "safe", mode: 0644},

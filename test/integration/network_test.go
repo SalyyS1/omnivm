@@ -39,7 +39,7 @@ func TestNetwork_BackendInStatus(t *testing.T) {
 // DNS goes to the resolver passed on the kernel command line.
 func TestNetwork_DNSResolution(t *testing.T) {
 	// Use nslookup from busybox to test DNS resolution
-	out := aegisRun(t, "run", "--", "sh", "-c",
+	out := ovmRun(t, "run", "--", "sh", "-c",
 		"nslookup example.com >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL")
 	if !strings.Contains(out, "DNS_OK") {
 		t.Fatalf("DNS resolution failed inside VM: %s", out)
@@ -48,7 +48,7 @@ func TestNetwork_DNSResolution(t *testing.T) {
 
 // TestNetwork_EgressHTTP verifies the VM can make outbound HTTP requests.
 func TestNetwork_EgressHTTP(t *testing.T) {
-	out := aegisRun(t, "run", "--", "sh", "-c",
+	out := ovmRun(t, "run", "--", "sh", "-c",
 		"wget -q -O /dev/null -T 10 http://example.com && echo HTTP_OK || echo HTTP_FAIL")
 	if !strings.Contains(out, "HTTP_OK") {
 		t.Fatalf("outbound HTTP failed: %s", out)
@@ -58,7 +58,7 @@ func TestNetwork_EgressHTTP(t *testing.T) {
 // TestNetwork_EgressHTTPS verifies the VM can make outbound HTTPS requests.
 // This validates TLS through the tap + NAT network path.
 func TestNetwork_EgressHTTPS(t *testing.T) {
-	out := aegisRun(t, "run", "--", "sh", "-c",
+	out := ovmRun(t, "run", "--", "sh", "-c",
 		"wget -q -O /dev/null -T 10 https://example.com && echo HTTPS_OK || echo HTTPS_FAIL")
 	if !strings.Contains(out, "HTTPS_OK") {
 		t.Fatalf("outbound HTTPS failed: %s", out)
@@ -89,7 +89,7 @@ except Exception as e:
     print(f'POST_FAIL={e}')
     sys.exit(1)
 `
-	out := aegisRun(t, "run", "--", "python3", "-c", script)
+	out := ovmRun(t, "run", "--", "python3", "-c", script)
 	if !strings.Contains(out, "POST_STATUS=200") {
 		t.Fatalf("50KB POST failed: %s", out)
 	}
@@ -116,7 +116,7 @@ except Exception as e:
     print(f'POST_FAIL={e}')
     sys.exit(1)
 `
-	out := aegisRun(t, "run", "--", "python3", "-c", script)
+	out := ovmRun(t, "run", "--", "python3", "-c", script)
 	if !strings.Contains(out, "POST_STATUS=200") {
 		t.Fatalf("100KB POST failed: %s", out)
 	}
@@ -284,7 +284,7 @@ resp = urllib.request.urlopen('https://httpbin.org/bytes/65536', timeout=30)
 data = resp.read()
 print(f'RECEIVED_BYTES={len(data)}')
 `
-	out := aegisRun(t, "run", "--", "python3", "-c", script)
+	out := ovmRun(t, "run", "--", "python3", "-c", script)
 	if !strings.Contains(out, "RECEIVED_BYTES=65536") {
 		t.Fatalf("large response download failed: %s", out)
 	}
@@ -337,7 +337,7 @@ if fail_count > 0:
         if r[0] == 'fail':
             print(f'  DETAIL: {r[1]}')
 `
-	out := aegisRun(t, "run", "--", "python3", "-c", script)
+	out := ovmRun(t, "run", "--", "python3", "-c", script)
 	if !strings.Contains(out, "CONCURRENT_OK=5 FAIL=0") {
 		t.Fatalf("concurrent 40KB POSTs failed: %s", out)
 	}

@@ -21,11 +21,11 @@ func TestGuestMCP_Initialize(t *testing.T) {
 	waitForState(t, id, "running", 30*time.Second)
 
 	// Send initialize via MCP protocol
-	out := aegisExec(t, id, "sh", "-c",
-		`echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}' | aegis-mcp-guest`)
+	out := ovmExec(t, id, "sh", "-c",
+		`echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}' | ovm-mcp-guest`)
 
-	if !strings.Contains(out, "aegis-guest") {
-		t.Fatalf("initialize should return server info with name 'aegis-guest', got: %s", out)
+	if !strings.Contains(out, "ovm-guest") {
+		t.Fatalf("initialize should return server info with name 'ovm-guest', got: %s", out)
 	}
 	if !strings.Contains(out, "instance_spawn") {
 		t.Fatalf("initialize should mention tools in instructions, got: %s", out)
@@ -43,8 +43,8 @@ func TestGuestMCP_ToolsList(t *testing.T) {
 
 	waitForState(t, id, "running", 30*time.Second)
 
-	out := aegisExec(t, id, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' | aegis-mcp-guest | tail -1`)
+	out := ovmExec(t, id, "sh", "-c",
+		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' | ovm-mcp-guest | tail -1`)
 
 	// Parse the tools/list response
 	var mcpResp struct {
@@ -85,8 +85,8 @@ func TestGuestMCP_SelfInfo(t *testing.T) {
 
 	waitForState(t, id, "running", 30*time.Second)
 
-	out := aegisExec(t, id, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"self_info","arguments":{}}}\n' | aegis-mcp-guest | tail -1`)
+	out := ovmExec(t, id, "sh", "-c",
+		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"self_info","arguments":{}}}\n' | ovm-mcp-guest | tail -1`)
 
 	if !strings.Contains(out, id) {
 		t.Fatalf("self_info should return instance ID %s, got: %s", id, out)
@@ -114,8 +114,8 @@ func TestGuestMCP_SpawnViaTools(t *testing.T) {
 
 	waitForState(t, id, "running", 30*time.Second)
 
-	out := aegisExec(t, id, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_spawn","arguments":{"command":["echo","mcp-child"],"handle":"mcp-child-1"}}}\n' | aegis-mcp-guest | tail -1`)
+	out := ovmExec(t, id, "sh", "-c",
+		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_spawn","arguments":{"command":["echo","mcp-child"],"handle":"mcp-child-1"}}}\n' | ovm-mcp-guest | tail -1`)
 
 	if !strings.Contains(out, "mcp-child-1") {
 		t.Fatalf("spawn should return child handle, got: %s", out)
@@ -152,14 +152,14 @@ func TestGuestMCP_InstanceListScoped(t *testing.T) {
 	waitForState(t, id2, "running", 30*time.Second)
 
 	// Spawn a child from parent A
-	aegisExec(t, id1, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_spawn","arguments":{"command":["sleep","60"],"handle":"child-of-a"}}}\n' | aegis-mcp-guest > /dev/null`)
+	ovmExec(t, id1, "sh", "-c",
+		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_spawn","arguments":{"command":["sleep","60"],"handle":"child-of-a"}}}\n' | ovm-mcp-guest > /dev/null`)
 
 	time.Sleep(2 * time.Second)
 
 	// List children from parent B — should NOT see child-of-a
-	out := aegisExec(t, id2, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_list","arguments":{}}}\n' | aegis-mcp-guest | tail -1`)
+	out := ovmExec(t, id2, "sh", "-c",
+		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"instance_list","arguments":{}}}\n' | ovm-mcp-guest | tail -1`)
 
 	if strings.Contains(out, "child-of-a") {
 		t.Fatalf("parent B should NOT see parent A's children, got: %s", out)

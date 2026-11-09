@@ -1,14 +1,14 @@
 # Binaries (anchored to repo root so cmd/ source dirs are not ignored)
 /bin/
-/aegisd
-/aegis
-/aegis-harness
-/aegis-mcp
-/aegis-mcp-guest
-/aegis-vmm-worker
-/aegis-gateway
-/aegis-agent
-/aegis-ui
+/ovmd
+/ovm
+/ovm-harness
+/ovm-mcp
+/ovm-mcp-guest
+/ovm-vmm-worker
+/ovm-gateway
+/ovm-agent
+/ovm-ui
 
 # Base rootfs
 base/*.ext4

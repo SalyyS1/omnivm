@@ -23,7 +23,7 @@ func TestRestart_RunningInstance(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Restart via CLI
-	out := aegisRun(t, "instance", "restart", "restart-running")
+	out := ovmRun(t, "instance", "restart", "restart-running")
 	if !strings.Contains(out, "restarting") {
 		t.Fatalf("expected 'restarting' in output, got: %s", out)
 	}
@@ -59,7 +59,7 @@ func TestRestart_StoppedInstance(t *testing.T) {
 	waitForState(t, id, "stopped", 30*time.Second)
 
 	// Restart from stopped state — should not error
-	out := aegisRun(t, "instance", "restart", "restart-stopped")
+	out := ovmRun(t, "instance", "restart", "restart-stopped")
 	if !strings.Contains(out, "restarting") {
 		t.Fatalf("expected 'restarting' in output, got: %s", out)
 	}
@@ -115,7 +115,7 @@ func TestRestart_PausedInstance(t *testing.T) {
 	waitForState(t, id, "paused", 10*time.Second)
 
 	// Restart from paused
-	out := aegisRun(t, "instance", "restart", "restart-paused")
+	out := ovmRun(t, "instance", "restart", "restart-paused")
 	if !strings.Contains(out, "restarting") {
 		t.Fatalf("expected 'restarting' in output, got: %s", out)
 	}

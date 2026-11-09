@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/lifecycle"
-	"github.com/xfeldman/aegisvm/internal/logstore"
-	"github.com/xfeldman/aegisvm/internal/registry"
-	"github.com/xfeldman/aegisvm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/lifecycle"
+	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/registry"
+	"github.com/SalyyS1/omnivm/internal/secrets"
 )
 
 func setupTestServer(t *testing.T) *Server {
@@ -271,11 +271,11 @@ func TestSecretRotationPickedUpByResolveEnv(t *testing.T) {
 
 func TestResolveWorkspace_NamedWorkspace(t *testing.T) {
 	s := &Server{
-		cfg: &config.Config{WorkspacesDir: "/home/user/.aegis/data/workspaces"},
+		cfg: &config.Config{WorkspacesDir: "/home/user/.omnivm/data/workspaces"},
 	}
 
 	got := s.resolveWorkspace("claw")
-	want := "/home/user/.aegis/data/workspaces/claw"
+	want := "/home/user/.omnivm/data/workspaces/claw"
 	if got != want {
 		t.Errorf("resolveWorkspace(%q) = %q, want %q", "claw", got, want)
 	}

@@ -2,7 +2,7 @@ package client
 
 import "time"
 
-// Instance represents an aegisd instance.
+// Instance represents an ovmd instance.
 type Instance struct {
 	ID                string                 `json:"id"`
 	State             string                 `json:"state"`

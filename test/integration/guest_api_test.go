@@ -22,7 +22,7 @@ func TestGuestAPI_SelfInfo(t *testing.T) {
 	waitForState(t, id, "running", 30*time.Second)
 
 	// Call guest API self_info from inside the VM
-	out := aegisExec(t, id, "wget", "-qO-", "http://127.0.0.1:7777/v1/self")
+	out := ovmExec(t, id, "wget", "-qO-", "http://127.0.0.1:7777/v1/self")
 	if !strings.Contains(out, id) {
 		t.Fatalf("self_info should contain instance ID %s, got: %s", id, out)
 	}
@@ -53,7 +53,7 @@ func TestGuestAPI_SpawnChild(t *testing.T) {
 	waitForState(t, parentID, "running", 30*time.Second)
 
 	// Spawn a child from inside the parent VM
-	out := aegisExec(t, parentID,
+	out := ovmExec(t, parentID,
 		"wget", "-qO-", "--post-data",
 		`{"command":["echo","hello from child"],"handle":"guest-child-1"}`,
 		"--header", "Content-Type: application/json",
@@ -67,7 +67,7 @@ func TestGuestAPI_SpawnChild(t *testing.T) {
 	}
 
 	// List children from inside parent
-	out = aegisExec(t, parentID, "wget", "-qO-", "http://127.0.0.1:7777/v1/instances")
+	out = ovmExec(t, parentID, "wget", "-qO-", "http://127.0.0.1:7777/v1/instances")
 	if !strings.Contains(out, "guest-child-1") {
 		t.Fatalf("list_children should include child, got: %s", out)
 	}
@@ -85,7 +85,7 @@ func TestGuestAPI_SpawnWithoutCapabilities(t *testing.T) {
 	waitForState(t, id, "running", 30*time.Second)
 
 	// Try to spawn — should fail (500)
-	_, err := aegisExecRaw(id, "wget", "-qO-", "--post-data",
+	_, err := ovmExecRaw(id, "wget", "-qO-", "--post-data",
 		`{"command":["echo","nope"]}`,
 		"--header", "Content-Type: application/json",
 		"http://127.0.0.1:7777/v1/instances",
@@ -114,7 +114,7 @@ func TestGuestAPI_CascadeStop(t *testing.T) {
 	waitForState(t, parentID, "running", 30*time.Second)
 
 	// Spawn a long-running child
-	out := aegisExec(t, parentID,
+	out := ovmExec(t, parentID,
 		"wget", "-qO-", "--post-data",
 		`{"command":["sleep","300"],"handle":"cascade-child"}`,
 		"--header", "Content-Type: application/json",
@@ -128,7 +128,7 @@ func TestGuestAPI_CascadeStop(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	// Disable parent (stops it)
-	aegisRun(t, "instance", "disable", parentID)
+	ovmRun(t, "instance", "disable", parentID)
 	time.Sleep(5 * time.Second)
 
 	// Child should be stopped
@@ -140,20 +140,20 @@ func TestGuestAPI_CascadeStop(t *testing.T) {
 }
 
 // Helper: exec in instance, return stdout
-func aegisExec(t *testing.T, id string, command ...string) string {
+func ovmExec(t *testing.T, id string, command ...string) string {
 	t.Helper()
 	args := append([]string{"exec", id, "--"}, command...)
-	out, err := aegis(args...)
+	out, err := ovm(args...)
 	if err != nil {
-		t.Fatalf("aegis exec %s %v failed: %v\noutput: %s", id, command, err, out)
+		t.Fatalf("ovm exec %s %v failed: %v\noutput: %s", id, command, err, out)
 	}
 	return out
 }
 
 // Helper: exec in instance, return stdout+error (for testing failures)
-func aegisExecRaw(id string, command ...string) (string, error) {
+func ovmExecRaw(id string, command ...string) (string, error) {
 	args := append([]string{"exec", id, "--"}, command...)
-	return aegis(args...)
+	return ovm(args...)
 }
 
 // apiGet is defined in helpers_test.go

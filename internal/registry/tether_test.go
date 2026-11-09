@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/xfeldman/aegisvm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/tether"
 )
 
 func TestSaveTetherFrame(t *testing.T) {

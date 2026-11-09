@@ -18,7 +18,7 @@ These paths are conventions, not enforced by the harness. You can write anywhere
 
 On the host, workspaces live at:
 
-- `~/.aegis/data/workspaces/`
+- `~/.omnivm/data/workspaces/`
 
 You can inspect workspace contents directly on the host.
 
@@ -27,7 +27,7 @@ You can inspect workspace contents directly on the host.
 - **Created**: when an instance is started with `--workspace` flag.
 - **Persists**: across VM pause/resume, disable/re-enable, and daemon restart.
 - **Deleted**: only when explicitly removed by the user.
-- **NOT deleted**: on `aegis down` (daemon shutdown), `aegis instance disable`, or VM stop (idle timeout).
+- **NOT deleted**: on `ovm down` (daemon shutdown), `ovm instance disable`, or VM stop (idle timeout).
 
 ## When No Workspace Exists
 
@@ -43,7 +43,7 @@ if os.path.isdir("/workspace")
 
 There is no automatic retention policy. Workspaces grow unbounded.
 
-To reclaim space, manually delete files under `~/.aegis/data/workspaces/`.
+To reclaim space, manually delete files under `~/.omnivm/data/workspaces/`.
 
 There is no built-in backup. Treat workspace contents as you would any local data.
 

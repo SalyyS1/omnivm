@@ -1,4 +1,4 @@
-// Package client provides a shared Go client for the aegisd HTTP API.
+// Package client provides a shared Go client for the ovmd HTTP API.
 // Used by the CLI, MCP server, UI server, and gateway — replaces per-binary
 // unix socket boilerplate.
 package client
@@ -19,13 +19,13 @@ import (
 	"time"
 )
 
-// Client talks to aegisd over a unix socket.
+// Client talks to ovmd over a unix socket.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
 }
 
-// New creates a client connected to the aegisd unix socket at socketPath.
+// New creates a client connected to the ovmd unix socket at socketPath.
 func New(socketPath string) *Client {
 	return &Client{
 		httpClient: &http.Client{
@@ -38,14 +38,14 @@ func New(socketPath string) *Client {
 			},
 			Timeout: 0, // no timeout for streaming
 		},
-		baseURL: "http://aegis",
+		baseURL: "http://ovm",
 	}
 }
 
-// DefaultSocketPath returns the default aegisd socket path (~/.aegis/aegisd.sock).
+// DefaultSocketPath returns the default ovmd socket path (~/.omnivm/ovmd.sock).
 func DefaultSocketPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".aegis", "aegisd.sock")
+	return filepath.Join(home, ".omnivm", "ovmd.sock")
 }
 
 // NewDefault creates a client using the default socket path.

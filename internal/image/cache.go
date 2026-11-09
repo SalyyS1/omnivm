@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/xfeldman/aegisvm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/config"
 )
 
 // Cache provides digest-keyed caching for unpacked OCI image rootfs directories.
@@ -163,29 +163,29 @@ func (c *Cache) rebuildIndex() {
 	}
 }
 
-// InjectHarness copies the harness binary into the rootfs at /usr/bin/aegis-harness.
+// InjectHarness copies the harness binary into the rootfs at /usr/bin/ovm-harness.
 // This path must match the ExecPath in the vmm-worker config — libkrun's
-// krun_set_exec() always starts /usr/bin/aegis-harness as PID 1, regardless
+// krun_set_exec() always starts /usr/bin/ovm-harness as PID 1, regardless
 // of the OCI image's ENTRYPOINT or CMD. Any existing file at this path in
 // the image is intentionally overwritten.
 func InjectHarness(rootfsDir, harnessBin string) error {
-	return injectBinary(rootfsDir, harnessBin, "aegis-harness")
+	return injectBinary(rootfsDir, harnessBin, "ovm-harness")
 }
 
-// InjectGuestBinaries copies all guest-side aegis binaries into the rootfs.
+// InjectGuestBinaries copies all guest-side ovm binaries into the rootfs.
 // Harness is required; mcp-guest is best-effort (skipped if not found).
 func InjectGuestBinaries(rootfsDir, binDir string) error {
 	// Harness is mandatory
-	harness := config.FindBinary("aegis-harness", binDir)
+	harness := config.FindBinary("ovm-harness", binDir)
 	if harness == "" {
-		return fmt.Errorf("open aegis-harness: not found in %s or system paths", binDir)
+		return fmt.Errorf("open ovm-harness: not found in %s or system paths", binDir)
 	}
-	if err := injectBinary(rootfsDir, harness, "aegis-harness"); err != nil {
+	if err := injectBinary(rootfsDir, harness, "ovm-harness"); err != nil {
 		return err
 	}
 
 	// Optional guest binaries — skip silently if not built
-	for _, name := range []string{"aegis-mcp-guest"} {
+	for _, name := range []string{"ovm-mcp-guest"} {
 		if src := config.FindBinary(name, binDir); src != "" {
 			if err := injectBinary(rootfsDir, src, name); err != nil {
 				return err

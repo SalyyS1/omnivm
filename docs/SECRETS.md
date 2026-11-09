@@ -2,13 +2,13 @@
 
 ## Overview
 
-Secrets are encrypted values stored in the Aegis registry and injected into VMs as environment variables at process start. They are never written to disk inside the VM.
+Secrets are encrypted values stored in the OmniVM registry and injected into VMs as environment variables at process start. They are never written to disk inside the VM.
 
 ## Storage
 
-Secrets are encrypted at rest with AES-256-GCM and stored in `~/.aegis/data/aegis.db` (SQLite, `secrets` table). The encrypted value is formatted as `nonce || ciphertext`, with the 12-byte nonce prepended to the ciphertext.
+Secrets are encrypted at rest with AES-256-GCM and stored in `~/.omnivm/data/ovm.db` (SQLite, `secrets` table). The encrypted value is formatted as `nonce || ciphertext`, with the 12-byte nonce prepended to the ciphertext.
 
-The master key lives at `~/.aegis/master.key` (32 random bytes, auto-generated on first use). The master key file has permissions 0600.
+The master key lives at `~/.omnivm/master.key` (32 random bytes, auto-generated on first use). The master key file has permissions 0600.
 
 Secret values are never exposed in API responses. List endpoints return names only.
 
@@ -23,13 +23,13 @@ secrets it receives via the `--secret` flag:
 
 ```bash
 # Inject specific secrets
-aegis run --secret API_KEY --secret DB_URL -- python app.py
+ovm run --secret API_KEY --secret DB_URL -- python app.py
 
 # Inject all secrets
-aegis run --secret '*' -- python agent.py
+ovm run --secret '*' -- python agent.py
 
 # No --secret flag = no secrets injected
-aegis run -- echo hello
+ovm run -- echo hello
 ```
 
 The `--secret` flag controls which secrets are visible to the instance:
@@ -41,7 +41,7 @@ At boot time, matching secrets are decrypted on the host and injected as env var
 via the `run` RPC. The harness passes them to the child process via `execve`.
 Host-side daemons (e.g. gateway) also receive the same env vars.
 
-## What Aegis Guarantees
+## What OmniVM Guarantees
 
 - Encrypted at rest (AES-256-GCM with local master key).
 - Never written to disk inside the VM.
@@ -49,29 +49,29 @@ Host-side daemons (e.g. gateway) also receive the same env vars.
 - Never returned in API responses (list shows names only).
 - Re-injected on every cold boot from disk layers.
 
-## What Aegis Does NOT Guarantee
+## What OmniVM Does NOT Guarantee
 
-- No key rotation. Deleting `~/.aegis/master.key` invalidates ALL stored secrets -- they become undecryptable. You must re-set all secrets after key deletion.
+- No key rotation. Deleting `~/.omnivm/master.key` invalidates ALL stored secrets -- they become undecryptable. You must re-set all secrets after key deletion.
 - No audit logging of secret access.
 - No hardware security module (HSM) integration -- the master key is a plain file.
 - An agent process CAN leak secrets by logging them, writing them to `/workspace`, or sending them over the network.
 
 ## Master Key
 
-- **Location**: `~/.aegis/master.key` (configurable via `config.MasterKeyPath`).
+- **Location**: `~/.omnivm/master.key` (configurable via `config.MasterKeyPath`).
 - **Auto-generated** on first use (32 bytes from `crypto/rand`).
 - **File permissions**: 0600; directory: 0700.
 - **If deleted**: all stored secrets are lost. No recovery.
 - **If compromised**: an attacker can decrypt all secrets in the SQLite database.
-- **Backup**: copy `~/.aegis/master.key` to a secure location. Restore by placing it back.
+- **Backup**: copy `~/.omnivm/master.key` to a secure location. Restore by placing it back.
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `aegis secret set KEY VALUE` | Set or update a secret |
-| `aegis secret list` | List secret names (no values) |
-| `aegis secret delete KEY` | Delete a secret |
+| `ovm secret set KEY VALUE` | Set or update a secret |
+| `ovm secret list` | List secret names (no values) |
+| `ovm secret delete KEY` | Delete a secret |
 
 ## Snapshot Restore and Secrets (Future)
 

@@ -1,27 +1,27 @@
-// aegis is the CLI for the Aegis agent runtime platform.
+// ovm is the CLI for the OmniVM agent runtime platform.
 //
 // Commands:
 //
-//	aegis up                   Start aegisd daemon
-//	aegis down                 Stop aegisd daemon
-//	aegis run                  Run a command in an ephemeral microVM (start + follow + delete)
-//	aegis instance start       Start new or restart stopped instance
-//	aegis instance list        List instances (--stopped, --running)
-//	aegis instance info        Show instance details
-//	aegis instance disable     Disable an instance (stop VM, close listeners, prevent auto-wake)
-//	aegis instance delete      Delete an instance (remove entirely)
-//	aegis instance pause       Pause an instance
-//	aegis instance resume      Resume a paused instance
-//	aegis instance prune       Remove stale stopped instances
-//	aegis exec                 Execute a command in a running instance
-//	aegis logs                 Stream instance logs
-//	aegis secret set           Set a secret
-//	aegis secret list          List secrets
-//	aegis secret delete        Delete a secret
-//	aegis mcp install          Register aegis-mcp in Claude Code
-//	aegis mcp uninstall        Remove aegis-mcp from Claude Code
-//	aegis status               Show daemon status
-//	aegis doctor               Print platform and backend info
+//	ovm up                   Start ovmd daemon
+//	ovm down                 Stop ovmd daemon
+//	ovm run                  Run a command in an ephemeral microVM (start + follow + delete)
+//	ovm instance start       Start new or restart stopped instance
+//	ovm instance list        List instances (--stopped, --running)
+//	ovm instance info        Show instance details
+//	ovm instance disable     Disable an instance (stop VM, close listeners, prevent auto-wake)
+//	ovm instance delete      Delete an instance (remove entirely)
+//	ovm instance pause       Pause an instance
+//	ovm instance resume      Resume a paused instance
+//	ovm instance prune       Remove stale stopped instances
+//	ovm exec                 Execute a command in a running instance
+//	ovm logs                 Stream instance logs
+//	ovm secret set           Set a secret
+//	ovm secret list          List secrets
+//	ovm secret delete        Delete a secret
+//	ovm mcp install          Register ovm-mcp in Claude Code
+//	ovm mcp uninstall        Remove ovm-mcp from Claude Code
+//	ovm status               Show daemon status
+//	ovm doctor               Print platform and backend info
 package main
 
 import (
@@ -44,8 +44,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/version"
 )
 
 func main() {
@@ -76,7 +76,7 @@ func main() {
 	case "mcp":
 		cmdMCP()
 	case "version", "--version", "-v":
-		fmt.Printf("aegis %s\n", version.Version())
+		fmt.Printf("ovm %s\n", version.Version())
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -87,11 +87,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Println(`Usage: aegis <command> [options]
+	fmt.Println(`Usage: ovm <command> [options]
 
 Commands:
-  up         Start aegisd daemon
-  down       Stop aegisd daemon
+  up         Start ovmd daemon
+  down       Stop ovmd daemon
   run        Run a command in an ephemeral microVM (start + follow + delete)
   status     Show daemon status
   doctor     Print platform and backend info
@@ -102,32 +102,32 @@ Commands:
   mcp        MCP server management (install)
 
 Examples:
-  aegis up
-  aegis run -- echo "hello from aegisvm"
-  aegis run --workspace ./myapp -- python3 /workspace/app.py
-  aegis instance start --name web -- python3 -m http.server 80
-  aegis instance expose web 80
-  aegis instance expose web 8080:80
-  aegis instance unexpose web 80
-  aegis instance disable web
-  aegis instance start --name web                                    (restart stopped/disabled)
-  aegis instance list --stopped
-  aegis instance prune --stopped-older-than 7d
-  aegis exec web -- echo hello
-  aegis logs web --follow
-  aegis secret set API_KEY sk-test123
-  aegis mcp install
-  aegis down`)
+  ovm up
+  ovm run -- echo "hello from omnivm"
+  ovm run --workspace ./myapp -- python3 /workspace/app.py
+  ovm instance start --name web -- python3 -m http.server 80
+  ovm instance expose web 80
+  ovm instance expose web 8080:80
+  ovm instance unexpose web 80
+  ovm instance disable web
+  ovm instance start --name web                                    (restart stopped/disabled)
+  ovm instance list --stopped
+  ovm instance prune --stopped-older-than 7d
+  ovm exec web -- echo hello
+  ovm logs web --follow
+  ovm secret set API_KEY sk-test123
+  ovm mcp install
+  ovm down`)
 }
 
 func socketPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".aegis", "aegisd.sock")
+	return filepath.Join(home, ".omnivm", "ovmd.sock")
 }
 
 func pidFilePath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".aegis", "data", "aegisd.pid")
+	return filepath.Join(home, ".omnivm", "data", "ovmd.pid")
 }
 
 func httpClient() *http.Client {
@@ -161,10 +161,10 @@ func isDaemonRunning() bool {
 }
 
 func cmdUp() {
-	fmt.Printf("aegis %s\n", version.Version())
+	fmt.Printf("ovm %s\n", version.Version())
 
 	if isDaemonRunning() {
-		fmt.Println("aegisd: already running")
+		fmt.Println("ovmd: already running")
 	} else {
 		startDaemon()
 	}
@@ -172,17 +172,17 @@ func cmdUp() {
 
 func startDaemon() {
 	exe, _ := os.Executable()
-	aegisdBin := filepath.Join(filepath.Dir(exe), "aegisd")
-	if _, err := os.Stat(aegisdBin); err != nil {
-		fmt.Fprintf(os.Stderr, "aegisd binary not found at %s\n", aegisdBin)
+	ovmdBin := filepath.Join(filepath.Dir(exe), "ovmd")
+	if _, err := os.Stat(ovmdBin); err != nil {
+		fmt.Fprintf(os.Stderr, "ovmd binary not found at %s\n", ovmdBin)
 		os.Exit(1)
 	}
 
 	// Redirect daemon output to log file instead of terminal
 	home, _ := os.UserHomeDir()
-	logDir := filepath.Join(home, ".aegis", "data")
+	logDir := filepath.Join(home, ".omnivm", "data")
 	os.MkdirAll(logDir, 0755)
-	logFile, err := os.OpenFile(filepath.Join(logDir, "aegisd.log"),
+	logFile, err := os.OpenFile(filepath.Join(logDir, "ovmd.log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create log file: %v\n", err)
@@ -206,19 +206,19 @@ func startDaemon() {
 
 	var cmd *exec.Cmd
 	if needsSudo {
-		cmd = exec.Command("sudo", "--preserve-env=HOME", aegisdBin)
+		cmd = exec.Command("sudo", "--preserve-env=HOME", ovmdBin)
 	} else {
-		cmd = exec.Command(aegisdBin)
+		cmd = exec.Command(ovmdBin)
 	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	// Own process group so SIGINT from the terminal
-	// doesn't kill the daemon. aegisd handles its own shutdown via SIGTERM
-	// from "aegis down".
+	// doesn't kill the daemon. ovmd handles its own shutdown via SIGTERM
+	// from "ovm down".
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "start aegisd: %v\n", err)
+		fmt.Fprintf(os.Stderr, "start ovmd: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -233,14 +233,14 @@ func startDaemon() {
 
 	for i := 0; i < 10; i++ {
 		if isDaemonRunning() {
-			fmt.Println("aegisd: started")
+			fmt.Println("ovmd: started")
 			return
 		}
 		// Check if the process exited early (e.g. missing root, missing binary)
 		select {
 		case <-exited:
 			logFile.Close() // flush before reading
-			fmt.Fprintln(os.Stderr, "aegisd exited immediately. Last log lines:")
+			fmt.Fprintln(os.Stderr, "ovmd exited immediately. Last log lines:")
 			showLogTail(logFile.Name(), 5)
 			os.Exit(1)
 		default:
@@ -248,7 +248,7 @@ func startDaemon() {
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	fmt.Fprintln(os.Stderr, "aegisd did not start within timeout. Check log:")
+	fmt.Fprintln(os.Stderr, "ovmd did not start within timeout. Check log:")
 	fmt.Fprintf(os.Stderr, "  %s\n", logFile.Name())
 	os.Exit(1)
 }
@@ -272,20 +272,20 @@ func showLogTail(path string, n int) {
 func cmdDown() {
 	data, err := os.ReadFile(pidFilePath())
 	if err != nil {
-		fmt.Println("aegisd is not running")
+		fmt.Println("ovmd is not running")
 		return
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
-		fmt.Println("aegisd is not running (invalid pid file)")
+		fmt.Println("ovmd is not running (invalid pid file)")
 		os.Remove(pidFilePath())
 		return
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
-		fmt.Println("aegisd is not running")
+		fmt.Println("ovmd is not running")
 		os.Remove(pidFilePath())
 		return
 	}
@@ -293,12 +293,12 @@ func cmdDown() {
 	// Check if actually alive before sending signal
 	probeErr := proc.Signal(syscall.Signal(0))
 	if probeErr != nil && !errors.Is(probeErr, syscall.EPERM) {
-		fmt.Println("aegisd is not running (stale pid file)")
+		fmt.Println("ovmd is not running (stale pid file)")
 		os.Remove(pidFilePath())
 		return
 	}
 
-	// Send SIGTERM to aegisd, which stops its VMs on shutdown.
+	// Send SIGTERM to ovmd, which stops its VMs on shutdown.
 	// We don't use process group kill because
 	// Setpgid may not take effect on all platforms, and killing the wrong
 	// group could take down the user's session.
@@ -314,19 +314,19 @@ func cmdDown() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("aegisd stopping (pid %d)\n", pid)
+	fmt.Printf("ovmd stopping (pid %d)\n", pid)
 
-	// Wait up to 10 seconds (aegisd may need time to stop VMs)
+	// Wait up to 10 seconds (ovmd may need time to stop VMs)
 	for i := 0; i < 100; i++ {
 		if proc.Signal(syscall.Signal(0)) != nil {
-			fmt.Println("aegisd stopped")
+			fmt.Println("ovmd stopped")
 			os.Remove(pidFilePath())
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	fmt.Fprintln(os.Stderr, "aegisd did not stop within timeout")
+	fmt.Fprintln(os.Stderr, "ovmd did not stop within timeout")
 	os.Exit(1)
 }
 
@@ -430,12 +430,12 @@ func cmdRun() {
 	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
 
 	if len(command) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: aegis run [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "usage: ovm run [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
 		os.Exit(1)
 	}
 
 	if !isDaemonRunning() {
-		fmt.Fprintln(os.Stderr, "aegisd is not running. Run 'aegis up' first.")
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
 		os.Exit(1)
 	}
 
@@ -472,7 +472,7 @@ func cmdRun() {
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)
-	resp, err := client.Post("http://aegis/v1/instances", "application/json", bytes.NewReader(bodyJSON))
+	resp, err := client.Post("http://ovm/v1/instances", "application/json", bytes.NewReader(bodyJSON))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create instance: %v\n", err)
 		os.Exit(1)
@@ -501,7 +501,7 @@ func cmdRun() {
 
 		// Follow logs. The logstore entry is pre-created at instance creation,
 		// so follow connects to a real subscriber even before boot starts.
-		logsResp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs?follow=1", instanceID))
+		logsResp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs?follow=1", instanceID))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "follow logs: %v\n", err)
 			return
@@ -545,13 +545,13 @@ func cmdRun() {
 	}
 
 	// Clean up: delete the instance
-	delReq, _ := http.NewRequest("DELETE", fmt.Sprintf("http://aegis/v1/instances/%s", instanceID), nil)
+	delReq, _ := http.NewRequest("DELETE", fmt.Sprintf("http://ovm/v1/instances/%s", instanceID), nil)
 	client.Do(delReq)
 
 	// Clean up temp workspace
 	if tempWorkspace != "" {
 		home, _ := os.UserHomeDir()
-		wsPath := filepath.Join(home, ".aegis", "data", "workspaces", tempWorkspace)
+		wsPath := filepath.Join(home, ".omnivm", "data", "workspaces", tempWorkspace)
 		os.RemoveAll(wsPath)
 	}
 
@@ -559,15 +559,15 @@ func cmdRun() {
 }
 
 func cmdStatus() {
-	fmt.Printf("aegis %s\n", version.Version())
+	fmt.Printf("ovm %s\n", version.Version())
 
 	if !isDaemonRunning() {
-		fmt.Println("aegisd: not running")
+		fmt.Println("ovmd: not running")
 		return
 	}
 
 	client := httpClient()
-	resp, err := client.Get("http://aegis/v1/status")
+	resp, err := client.Get("http://ovm/v1/status")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get status: %v\n", err)
 		os.Exit(1)
@@ -577,12 +577,12 @@ func cmdStatus() {
 	var status map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&status)
 
-	fmt.Printf("aegisd: %s\n", status["status"])
+	fmt.Printf("ovmd: %s\n", status["status"])
 	fmt.Printf("backend: %s\n", status["backend"])
 }
 
 func cmdDoctor() {
-	fmt.Println("Aegis Doctor")
+	fmt.Println("OmniVM Doctor")
 	fmt.Println("============")
 	fmt.Println()
 
@@ -611,10 +611,10 @@ func cmdDoctor() {
 
 	fmt.Println()
 	if isDaemonRunning() {
-		fmt.Printf("aegisd:             running\n")
+		fmt.Printf("ovmd:             running\n")
 
 		client := httpClient()
-		resp, err := client.Get("http://aegis/v1/status")
+		resp, err := client.Get("http://ovm/v1/status")
 		if err == nil {
 			defer resp.Body.Close()
 			var status map[string]interface{}
@@ -634,13 +634,13 @@ func cmdDoctor() {
 			}
 		}
 	} else {
-		fmt.Printf("aegisd:             not running\n")
+		fmt.Printf("ovmd:             not running\n")
 	}
 }
 
 func doctorLinux() {
 	home, _ := os.UserHomeDir()
-	aegisDir := filepath.Join(home, ".aegis")
+	ovmDir := filepath.Join(home, ".omnivm")
 	exe, _ := os.Executable()
 	binDir := filepath.Dir(exe)
 
@@ -674,7 +674,7 @@ func doctorLinux() {
 	}
 
 	// Kernel
-	kernelPath := filepath.Join(aegisDir, "kernel", "vmlinux")
+	kernelPath := filepath.Join(ovmDir, "kernel", "vmlinux")
 	if info, err := os.Stat(kernelPath); err == nil {
 		fmt.Printf("kernel:             found at %s (%dMB)\n", kernelPath, info.Size()/(1024*1024))
 	} else {
@@ -698,7 +698,7 @@ func cmdInstance() {
 	}
 
 	if !isDaemonRunning() {
-		fmt.Fprintln(os.Stderr, "aegisd is not running. Run 'aegis up' first.")
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
 		os.Exit(1)
 	}
 
@@ -737,7 +737,7 @@ func cmdInstance() {
 }
 
 func instanceUsage() {
-	fmt.Println(`Usage: aegis instance <command> [options]
+	fmt.Println(`Usage: ovm instance <command> [options]
 
 Commands:
   start      Start a new instance (or restart a stopped/disabled instance by --name)
@@ -753,18 +753,18 @@ Commands:
   prune      Remove stopped instances older than a threshold
 
 Examples:
-  aegis instance start --name web -- python3 -m http.server 80
-  aegis instance expose web 80
-  aegis instance expose web 8080:80
-  aegis instance unexpose web 80
-  aegis instance start --name web                                (restart stopped/disabled)
-  aegis instance list
-  aegis instance list --stopped
-  aegis instance info web
-  aegis instance restart web
-  aegis instance disable web
-  aegis instance delete web
-  aegis instance prune --stopped-older-than 7d`)
+  ovm instance start --name web -- python3 -m http.server 80
+  ovm instance expose web 80
+  ovm instance expose web 8080:80
+  ovm instance unexpose web 80
+  ovm instance start --name web                                (restart stopped/disabled)
+  ovm instance list
+  ovm instance list --stopped
+  ovm instance info web
+  ovm instance restart web
+  ovm instance disable web
+  ovm instance delete web
+  ovm instance prune --stopped-older-than 7d`)
 }
 
 // cmdInstanceStart starts a new instance.
@@ -774,8 +774,8 @@ func cmdInstanceStart(client *http.Client) {
 	name, imageRef, envVars, secretKeys, workspace, command := parseRunFlags(args)
 
 	if len(command) == 0 && name == "" {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance start [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
-		fmt.Fprintln(os.Stderr, "       aegis instance start --name NAME   (restart stopped instance)")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance start [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "       ovm instance start --name NAME   (restart stopped instance)")
 		os.Exit(1)
 	}
 
@@ -805,7 +805,7 @@ func cmdInstanceStart(client *http.Client) {
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)
-	resp, err := client.Post("http://aegis/v1/instances", "application/json", bytes.NewReader(bodyJSON))
+	resp, err := client.Post("http://ovm/v1/instances", "application/json", bytes.NewReader(bodyJSON))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create instance: %v\n", err)
 		os.Exit(1)
@@ -850,13 +850,13 @@ func cmdInstanceStart(client *http.Client) {
 
 func cmdInstanceList(client *http.Client) {
 	// Parse optional --stopped or --running filter
-	url := "http://aegis/v1/instances"
+	url := "http://ovm/v1/instances"
 	for _, arg := range os.Args[3:] {
 		switch arg {
 		case "--stopped":
-			url = "http://aegis/v1/instances?state=stopped"
+			url = "http://ovm/v1/instances?state=stopped"
 		case "--running":
-			url = "http://aegis/v1/instances?state=running"
+			url = "http://ovm/v1/instances?state=running"
 		}
 	}
 
@@ -919,7 +919,7 @@ func cmdInstanceList(client *http.Client) {
 
 func cmdInstanceInfo(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance info HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance info HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -930,7 +930,7 @@ func cmdInstanceInfo(client *http.Client) {
 		os.Exit(1)
 	}
 
-	resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s", instID))
+	resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s", instID))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "get instance: %v\n", err)
 		os.Exit(1)
@@ -1019,7 +1019,7 @@ func cmdInstanceInfo(client *http.Client) {
 
 func cmdInstanceDisable(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance disable HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance disable HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -1030,7 +1030,7 @@ func cmdInstanceDisable(client *http.Client) {
 		os.Exit(1)
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://aegis/v1/instances/%s/disable", instID), "application/json", nil)
+	resp, err := client.Post(fmt.Sprintf("http://ovm/v1/instances/%s/disable", instID), "application/json", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "disable instance: %v\n", err)
 		os.Exit(1)
@@ -1048,7 +1048,7 @@ func cmdInstanceDisable(client *http.Client) {
 
 func cmdInstanceRestart(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance restart HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance restart HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -1059,7 +1059,7 @@ func cmdInstanceRestart(client *http.Client) {
 		os.Exit(1)
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://aegis/v1/instances/%s/restart", instID), "application/json", nil)
+	resp, err := client.Post(fmt.Sprintf("http://ovm/v1/instances/%s/restart", instID), "application/json", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "restart failed: %v\n", err)
 		os.Exit(1)
@@ -1075,7 +1075,7 @@ func cmdInstanceRestart(client *http.Client) {
 
 func cmdInstanceDelete(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance delete HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance delete HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -1086,7 +1086,7 @@ func cmdInstanceDelete(client *http.Client) {
 		os.Exit(1)
 	}
 
-	req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://aegis/v1/instances/%s", instID), nil)
+	req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://ovm/v1/instances/%s", instID), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delete instance: %v\n", err)
@@ -1105,7 +1105,7 @@ func cmdInstanceDelete(client *http.Client) {
 
 func cmdInstancePause(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance pause HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance pause HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -1116,7 +1116,7 @@ func cmdInstancePause(client *http.Client) {
 		os.Exit(1)
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://aegis/v1/instances/%s/pause", instID), "application/json", nil)
+	resp, err := client.Post(fmt.Sprintf("http://ovm/v1/instances/%s/pause", instID), "application/json", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pause instance: %v\n", err)
 		os.Exit(1)
@@ -1134,7 +1134,7 @@ func cmdInstancePause(client *http.Client) {
 
 func cmdInstanceResume(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance resume HANDLE_OR_ID")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance resume HANDLE_OR_ID")
 		os.Exit(1)
 	}
 
@@ -1145,7 +1145,7 @@ func cmdInstanceResume(client *http.Client) {
 		os.Exit(1)
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://aegis/v1/instances/%s/resume", instID), "application/json", nil)
+	resp, err := client.Post(fmt.Sprintf("http://ovm/v1/instances/%s/resume", instID), "application/json", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "resume instance: %v\n", err)
 		os.Exit(1)
@@ -1163,7 +1163,7 @@ func cmdInstanceResume(client *http.Client) {
 
 func cmdInstanceExpose(client *http.Client) {
 	if len(os.Args) < 5 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance expose HANDLE_OR_ID GUEST[:PUBLIC][/PROTO]")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance expose HANDLE_OR_ID GUEST[:PUBLIC][/PROTO]")
 		os.Exit(1)
 	}
 
@@ -1186,7 +1186,7 @@ func cmdInstanceExpose(client *http.Client) {
 
 	bodyJSON, _ := json.Marshal(reqBody)
 	resp, err := client.Post(
-		fmt.Sprintf("http://aegis/v1/instances/%s/expose", instID),
+		fmt.Sprintf("http://ovm/v1/instances/%s/expose", instID),
 		"application/json",
 		bytes.NewReader(bodyJSON),
 	)
@@ -1215,7 +1215,7 @@ func cmdInstanceExpose(client *http.Client) {
 
 func cmdInstanceUnexpose(client *http.Client) {
 	if len(os.Args) < 5 {
-		fmt.Fprintln(os.Stderr, "usage: aegis instance unexpose HANDLE_OR_ID GUEST_PORT")
+		fmt.Fprintln(os.Stderr, "usage: ovm instance unexpose HANDLE_OR_ID GUEST_PORT")
 		os.Exit(1)
 	}
 
@@ -1233,7 +1233,7 @@ func cmdInstanceUnexpose(client *http.Client) {
 	}
 
 	req, _ := http.NewRequest("DELETE",
-		fmt.Sprintf("http://aegis/v1/instances/%s/expose/%d", instID, guestPort), nil)
+		fmt.Sprintf("http://ovm/v1/instances/%s/expose/%d", instID, guestPort), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "unexpose: %v\n", err)
@@ -1259,7 +1259,7 @@ func cmdInstancePrune(client *http.Client) {
 		}
 	}
 
-	resp, err := client.Post(fmt.Sprintf("http://aegis/v1/instances/prune?older_than=%s", olderThan), "application/json", nil)
+	resp, err := client.Post(fmt.Sprintf("http://ovm/v1/instances/prune?older_than=%s", olderThan), "application/json", nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "prune instances: %v\n", err)
 		os.Exit(1)
@@ -1283,12 +1283,12 @@ func cmdExec() {
 	args := os.Args[2:]
 
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: aegis exec HANDLE_OR_ID -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "usage: ovm exec HANDLE_OR_ID -- COMMAND [args...]")
 		os.Exit(1)
 	}
 
 	if !isDaemonRunning() {
-		fmt.Fprintln(os.Stderr, "aegisd is not running. Run 'aegis up' first.")
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
 		os.Exit(1)
 	}
 
@@ -1302,7 +1302,7 @@ func cmdExec() {
 	}
 
 	if len(command) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: aegis exec HANDLE_OR_ID -- COMMAND [args...]")
+		fmt.Fprintln(os.Stderr, "usage: ovm exec HANDLE_OR_ID -- COMMAND [args...]")
 		os.Exit(1)
 	}
 
@@ -1319,7 +1319,7 @@ func cmdExec() {
 	}
 	bodyJSON, _ := json.Marshal(reqBody)
 	resp, err := client.Post(
-		fmt.Sprintf("http://aegis/v1/instances/%s/exec", instID),
+		fmt.Sprintf("http://ovm/v1/instances/%s/exec", instID),
 		"application/json",
 		bytes.NewReader(bodyJSON),
 	)
@@ -1374,7 +1374,7 @@ func cmdExec() {
 // resolveInstanceTarget resolves a target (handle or instance ID) to an instance ID.
 func resolveInstanceTarget(client *http.Client, target string) string {
 	// Try as instance ID first
-	resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s", target))
+	resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s", target))
 	if err == nil {
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
@@ -1386,7 +1386,7 @@ func resolveInstanceTarget(client *http.Client, target string) string {
 	}
 
 	// Try as handle — scan instances list
-	instResp, err := client.Get("http://aegis/v1/instances")
+	instResp, err := client.Get("http://ovm/v1/instances")
 	if err != nil {
 		return ""
 	}
@@ -1408,12 +1408,12 @@ func resolveInstanceTarget(client *http.Client, target string) string {
 // cmdLogs streams logs for an instance.
 func cmdLogs() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: aegis logs HANDLE_OR_ID [--follow]")
+		fmt.Fprintln(os.Stderr, "usage: ovm logs HANDLE_OR_ID [--follow]")
 		os.Exit(1)
 	}
 
 	if !isDaemonRunning() {
-		fmt.Fprintln(os.Stderr, "aegisd is not running. Run 'aegis up' first.")
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
 		os.Exit(1)
 	}
 
@@ -1433,7 +1433,7 @@ func cmdLogs() {
 		os.Exit(1)
 	}
 
-	url := fmt.Sprintf("http://aegis/v1/instances/%s/logs", instID)
+	url := fmt.Sprintf("http://ovm/v1/instances/%s/logs", instID)
 	if follow {
 		url += "?follow=1"
 	}
@@ -1497,7 +1497,7 @@ func cmdSecret() {
 	}
 
 	if !isDaemonRunning() {
-		fmt.Fprintln(os.Stderr, "aegisd is not running. Run 'aegis up' first.")
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
 		os.Exit(1)
 	}
 
@@ -1520,7 +1520,7 @@ func cmdSecret() {
 }
 
 func secretUsage() {
-	fmt.Println(`Usage: aegis secret <command> [options]
+	fmt.Println(`Usage: ovm secret <command> [options]
 
 Commands:
   set      Set a secret
@@ -1528,16 +1528,16 @@ Commands:
   delete   Delete a secret
 
 Examples:
-  aegis secret set API_KEY sk-test123
-  aegis secret list
-  aegis secret delete API_KEY`)
+  ovm secret set API_KEY sk-test123
+  ovm secret list
+  ovm secret delete API_KEY`)
 }
 
 // cmdSecretSet sets a workspace secret.
-// aegis secret set <key> <value>
+// ovm secret set <key> <value>
 func cmdSecretSet(client *http.Client) {
 	if len(os.Args) < 5 {
-		fmt.Fprintln(os.Stderr, "usage: aegis secret set KEY VALUE")
+		fmt.Fprintln(os.Stderr, "usage: ovm secret set KEY VALUE")
 		os.Exit(1)
 	}
 
@@ -1546,7 +1546,7 @@ func cmdSecretSet(client *http.Client) {
 
 	bodyJSON, _ := json.Marshal(map[string]string{"value": value})
 	req, _ := http.NewRequest("PUT",
-		fmt.Sprintf("http://aegis/v1/secrets/%s", key),
+		fmt.Sprintf("http://ovm/v1/secrets/%s", key),
 		bytes.NewReader(bodyJSON))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -1570,7 +1570,7 @@ func cmdSecretSet(client *http.Client) {
 
 // cmdSecretList lists workspace secrets.
 func cmdSecretList(client *http.Client) {
-	resp, err := client.Get("http://aegis/v1/secrets")
+	resp, err := client.Get("http://ovm/v1/secrets")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list secrets: %v\n", err)
 		os.Exit(1)
@@ -1594,13 +1594,13 @@ func cmdSecretList(client *http.Client) {
 
 func cmdSecretDelete(client *http.Client) {
 	if len(os.Args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: aegis secret delete KEY")
+		fmt.Fprintln(os.Stderr, "usage: ovm secret delete KEY")
 		os.Exit(1)
 	}
 
 	key := os.Args[3]
 
-	req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://aegis/v1/secrets/%s", key), nil)
+	req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://ovm/v1/secrets/%s", key), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delete secret: %v\n", err)
@@ -1623,11 +1623,11 @@ func cmdSecretDelete(client *http.Client) {
 
 func cmdMCP() {
 	if len(os.Args) < 3 {
-		fmt.Println(`Usage: aegis mcp <command>
+		fmt.Println(`Usage: ovm mcp <command>
 
 Commands:
-  install    Register aegis-mcp as an MCP server in Claude Code
-  uninstall  Remove aegis-mcp from Claude Code`)
+  install    Register ovm-mcp as an MCP server in Claude Code
+  uninstall  Remove ovm-mcp from Claude Code`)
 		os.Exit(1)
 	}
 
@@ -1645,13 +1645,13 @@ Commands:
 func findMCPBinary() string {
 	// Look next to our own binary first
 	exe, _ := os.Executable()
-	candidate := filepath.Join(filepath.Dir(exe), "aegis-mcp")
+	candidate := filepath.Join(filepath.Dir(exe), "ovm-mcp")
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate
 	}
 
 	// Fall back to PATH
-	if p, err := exec.LookPath("aegis-mcp"); err == nil {
+	if p, err := exec.LookPath("ovm-mcp"); err == nil {
 		return p
 	}
 
@@ -1661,7 +1661,7 @@ func findMCPBinary() string {
 func cmdMCPInstall() {
 	mcpBin := findMCPBinary()
 	if mcpBin == "" {
-		fmt.Fprintln(os.Stderr, "aegis-mcp binary not found (not next to aegis and not in PATH)")
+		fmt.Fprintln(os.Stderr, "ovm-mcp binary not found (not next to ovm and not in PATH)")
 		os.Exit(1)
 	}
 
@@ -1681,7 +1681,7 @@ func cmdMCPInstall() {
 		}
 	}
 
-	cmd := exec.Command(claudeBin, "mcp", "add", "--transport", "stdio", "--scope", scope, "aegis", "--", mcpBin)
+	cmd := exec.Command(claudeBin, "mcp", "add", "--transport", "stdio", "--scope", scope, "ovm", "--", mcpBin)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -1689,7 +1689,7 @@ func cmdMCPInstall() {
 		os.Exit(1)
 	}
 
-	fmt.Println("aegis MCP server registered in Claude Code")
+	fmt.Println("ovm MCP server registered in Claude Code")
 	fmt.Printf("  binary: %s\n", mcpBin)
 	fmt.Printf("  scope:  %s\n", scope)
 }
@@ -1701,7 +1701,7 @@ func cmdMCPUninstall() {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command(claudeBin, "mcp", "remove", "aegis")
+	cmd := exec.Command(claudeBin, "mcp", "remove", "ovm")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -1709,12 +1709,12 @@ func cmdMCPUninstall() {
 		os.Exit(1)
 	}
 
-	fmt.Println("aegis MCP server removed from Claude Code")
+	fmt.Println("ovm MCP server removed from Claude Code")
 }
 
 // --- Default image ---
 //
 // When no --image is specified, the CLI defaults to defaultImage.
-// aegisd's OCI pull/cache mechanism handles the rest.
+// ovmd's OCI pull/cache mechanism handles the rest.
 
 const defaultImage = "python:3.12-alpine"

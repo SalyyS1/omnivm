@@ -3,7 +3,7 @@ set -e
 
 if [ ! -e /dev/kvm ]; then
     echo "WARNING: /dev/kvm not found."
-    echo "AegisVM requires KVM for hardware-accelerated VMs."
+    echo "OmniVM requires KVM for hardware-accelerated VMs."
     echo "Ensure your kernel has KVM support and load the module:"
     echo "  sudo modprobe kvm"
     echo "  sudo modprobe kvm_intel  # x86 Intel"

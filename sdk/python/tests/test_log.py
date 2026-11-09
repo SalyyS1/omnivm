@@ -1,10 +1,10 @@
-"""Tests for aegis.log."""
+"""Tests for omnivm.log."""
 
 import io
 import json
 import sys
 
-from aegis import log
+from omnivm import log
 
 
 def test_info_writes_json_to_stdout(monkeypatch):

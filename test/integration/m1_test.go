@@ -116,7 +116,7 @@ func TestServeCleanShutdown(t *testing.T) {
 }
 
 func TestRunModeUnchanged(t *testing.T) {
-	out := aegisRun(t, "run", "--", "echo", "run mode ok")
+	out := ovmRun(t, "run", "--", "echo", "run mode ok")
 	if !strings.Contains(out, "run mode ok") {
 		t.Fatalf("run mode broken after serve tests, got: %s", out)
 	}

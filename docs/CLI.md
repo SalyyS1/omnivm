@@ -1,26 +1,26 @@
-# AegisVM CLI Reference
+# OmniVM CLI Reference
 
-The `aegis` command is the primary interface to the AegisVM agent runtime platform.
-All commands communicate with the `aegisd` daemon over a Unix socket at
-`~/.aegis/aegisd.sock`. The daemon PID file is stored at `~/.aegis/data/aegisd.pid`.
+The `ovm` command is the primary interface to the OmniVM agent runtime platform.
+All commands communicate with the `ovmd` daemon over a Unix socket at
+`~/.omnivm/ovmd.sock`. The daemon PID file is stored at `~/.omnivm/data/ovmd.pid`.
 
 ```
-aegis <command> [options]
+ovm <command> [options]
 ```
 
-Run `aegis help` to print top-level usage.
+Run `ovm help` to print top-level usage.
 
 ---
 
-## AegisVM Is Not Docker
+## OmniVM Is Not Docker
 
-AegisVM uses OCI images for the **filesystem only**. If you are coming from Docker,
+OmniVM uses OCI images for the **filesystem only**. If you are coming from Docker,
 these differences matter:
 
-| Docker concept | AegisVM behavior |
+| Docker concept | OmniVM behavior |
 |----------------|----------------|
-| `ENTRYPOINT` | Ignored. PID 1 is always `aegis-harness`. |
-| `CMD` | Ignored. The command comes from `aegis run -- CMD` or `aegis instance start -- CMD`. |
+| `ENTRYPOINT` | Ignored. PID 1 is always `ovm-harness`. |
+| `CMD` | Ignored. The command comes from `ovm run -- CMD` or `ovm instance start -- CMD`. |
 | `ENV` | Ignored. Environment is set by secrets + RPC params. |
 | `EXPOSE` | Ignored. Ports are declared via `--expose` flag (Docker-style port mapping). |
 | `VOLUME` | Ignored. Writable paths are fixed (`/workspace`, `/tmp`, `/run`, `/var`). |
@@ -33,65 +33,65 @@ guest environment contract.
 
 ## Platform Commands
 
-### aegis up
+### ovm up
 
-Start the aegisd daemon.
+Start the ovmd daemon.
 
 ```
-aegis up
+ovm up
 ```
 
-Locates the `aegisd` binary next to the `aegis` binary, starts it as a
+Locates the `ovmd` binary next to the `ovm` binary, starts it as a
 subprocess, and waits up to 2 seconds for the PID file to appear. If the
 daemon is already running, prints a message and exits without error.
 
-Kit daemons (e.g., `aegis-gateway`) are managed per-instance by aegisd, not
-by `aegis up`. When an instance with a kit that declares `instance_daemons`
-is created or enabled, aegisd spawns the daemon automatically. See
+Kit daemons (e.g., `ovm-gateway`) are managed per-instance by ovmd, not
+by `ovm up`. When an instance with a kit that declares `instance_daemons`
+is created or enabled, ovmd spawns the daemon automatically. See
 [Agent Kit docs](AGENT_KIT.md) for details.
 
-If no base rootfs is installed at `~/.aegis/base-rootfs/`, automatically
+If no base rootfs is installed at `~/.omnivm/base-rootfs/`, automatically
 downloads the default variant (`python` — Alpine + Python 3.12) before
-starting the daemon. See `aegis rootfs` for managing rootfs variants.
+starting the daemon. See `ovm rootfs` for managing rootfs variants.
 
 **Example:**
 
 ```
-$ aegis up
-aegis v0.4.0
-aegisd: started
+$ ovm up
+ovm v0.4.0
+ovmd: started
 ```
 
 ---
 
-### aegis down
+### ovm down
 
-Stop the aegisd daemon.
+Stop the ovmd daemon.
 
 ```
-aegis down
+ovm down
 ```
 
-Stops aegisd, which in turn stops all per-instance kit daemons and VMs. Sends
+Stops ovmd, which in turn stops all per-instance kit daemons and VMs. Sends
 SIGTERM and waits up to 5 seconds for the process to exit. If the daemon is
 not running, prints a message and exits without error.
 
 **Example:**
 
 ```
-$ aegis down
-aegisd stopping (pid 48201)
-aegisd stopped
+$ ovm down
+ovmd stopping (pid 48201)
+ovmd stopped
 ```
 
 ---
 
-### aegis status
+### ovm status
 
 Show daemon status.
 
 ```
-aegis status
+ovm status
 ```
 
 Checks whether the daemon is running, then queries `GET /v1/status` to display
@@ -100,39 +100,39 @@ the backend name.
 **Example:**
 
 ```
-$ aegis status
-aegisd: running
+$ ovm status
+ovmd: running
 backend: libkrun
 ```
 
 ---
 
-### aegis doctor
+### ovm doctor
 
 Diagnose the local environment.
 
 ```
-aegis doctor
+ovm doctor
 ```
 
 Checks for the presence of required tools and libraries:
 
 - Go
-- krunvm (optional -- libkrun CLI, not used by AegisVM directly)
+- krunvm (optional -- libkrun CLI, not used by OmniVM directly)
 - libkrun shared library
 - e2fsprogs / `mkfs.ext4`
 - Daemon status and capabilities
 
 ---
 
-## aegis run
+## ovm run
 
 Ephemeral command: creates an instance, follows logs, waits for exit, deletes
 the instance. If `--workspace` is omitted, a temporary workspace is allocated
 and deleted after. If `--workspace` is provided, that workspace is preserved.
 
 ```
-aegis run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
 ```
 
 **Flags:**
@@ -142,9 +142,9 @@ aegis run [--expose [PUBLIC:]GUEST[/PROTO]] [--name NAME] [--image IMAGE] [--kit
 | `--image IMAGE` | OCI image reference (e.g., `alpine:3.21`). Without this, the base rootfs is used. |
 | `--expose [PUBLIC:]GUEST[/PROTO]` | Port to expose. `8080:80` maps public 8080 to guest 80. `80` assigns a random public port. Optional `/tcp` or `/http` protocol hint. May be specified multiple times. |
 | `--name NAME` | Handle alias for the instance. |
-| `--kit KIT` | Kit preset name (e.g., `agent`). Supplies defaults for command, image, and capabilities from the kit manifest. Explicit flags override kit defaults. See `aegis kit list`. |
+| `--kit KIT` | Kit preset name (e.g., `agent`). Supplies defaults for command, image, and capabilities from the kit manifest. Explicit flags override kit defaults. See `ovm kit list`. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
-| `--workspace NAME_OR_PATH` | Named workspace (e.g., `claw`) or host path (e.g., `./myapp`). Named workspaces resolve to `~/.aegis/data/workspaces/<name>`. |
+| `--workspace NAME_OR_PATH` | Named workspace (e.g., `claw`) or host path (e.g., `./myapp`). Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
 
 Creates an instance via `POST /v1/instances`, streams logs, and watches for
 process exit. On Ctrl+C or process exit, sends `DELETE /v1/instances/{id}` to
@@ -157,34 +157,34 @@ an instance receives via `--secret KEY`. This prevents accidental leakage.
 
 ```
 # Run a one-shot command
-$ aegis run -- echo "hello from aegisvm"
-hello from aegisvm
+$ ovm run -- echo "hello from omnivm"
+hello from omnivm
 
 # Run with deterministic port (public 8080 → guest 80)
-$ aegis run --expose 8080:80 -- python3 -m http.server 80
+$ ovm run --expose 8080:80 -- python3 -m http.server 80
 
 # Run with random public port
-$ aegis run --expose 80 -- python3 -m http.server 80
+$ ovm run --expose 80 -- python3 -m http.server 80
 
 # Run with secrets
-$ aegis run --secret API_KEY --expose 8080:80 -- python app.py
+$ ovm run --secret API_KEY --expose 8080:80 -- python app.py
 ```
 
 ---
 
 ## Instance Commands
 
-Manage instances -- the core runtime object in AegisVM.
+Manage instances -- the core runtime object in OmniVM.
 
-Run `aegis instance help` to print subcommand usage.
+Run `ovm instance help` to print subcommand usage.
 
-### aegis instance start
+### ovm instance start
 
 Start a new instance, or restart a stopped instance by handle.
 
 ```
-aegis instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
-aegis instance start --name NAME                          (restart stopped instance)
+ovm instance start [--name NAME] [--expose [PUBLIC:]GUEST[/PROTO]] [--image IMAGE] [--kit KIT] [--secret KEY] [--workspace NAME_OR_PATH] -- COMMAND [ARGS...]
+ovm instance start --name NAME                          (restart stopped instance)
 ```
 
 Idempotent on `--name`: if the named instance exists and is STOPPED (whether
@@ -200,38 +200,38 @@ is RUNNING or STARTING, returns 409. If not found, creates a new instance.
 | `--image IMAGE` | OCI image reference. |
 | `--kit KIT` | Kit preset. Supplies defaults for command, image, and capabilities from the kit manifest. Explicit flags override. |
 | `--secret KEY` | Secret to inject as env var. Use `--secret '*'` for all secrets. May be specified multiple times. Default: none. |
-| `--workspace NAME_OR_PATH` | Named workspace or host path. Named workspaces resolve to `~/.aegis/data/workspaces/<name>`. |
+| `--workspace NAME_OR_PATH` | Named workspace or host path. Named workspaces resolve to `~/.omnivm/data/workspaces/<name>`. |
 
 **Examples:**
 
 ```
 # Start with a kit (supplies command, image, capabilities from manifest)
-$ aegis instance start --kit agent --name my-agent --secret OPENAI_API_KEY
+$ ovm instance start --kit agent --name my-agent --secret OPENAI_API_KEY
 Instance started: inst-173f...
 Handle: my-agent
 
 # Kit with command override (debug shell in a kit-configured VM)
-$ aegis instance start --kit agent --name debug --secret OPENAI_API_KEY -- sh
+$ ovm instance start --kit agent --name debug --secret OPENAI_API_KEY -- sh
 
 # Start without a kit
-$ aegis instance start --name web --expose 8080:80 --workspace myapp -- python3 -m http.server 80
+$ ovm instance start --name web --expose 8080:80 --workspace myapp -- python3 -m http.server 80
 Instance started: inst-173f...
 Handle: web
 
 # Restart a stopped instance
-$ aegis instance disable web
-$ aegis instance start --name web
+$ ovm instance disable web
+$ ovm instance start --name web
 Instance restarted: inst-173f...
 ```
 
 ---
 
-### aegis instance list
+### ovm instance list
 
 List instances, optionally filtered by state.
 
 ```
-aegis instance list [--stopped | --running]
+ovm instance list [--stopped | --running]
 ```
 
 Columns: ID, HANDLE, STATUS (enabled/disabled), STATE, STOPPED AT. Output is
@@ -241,24 +241,24 @@ stopped in gray.
 **Examples:**
 
 ```
-$ aegis instance list
+$ ovm instance list
 ID                             HANDLE          STATUS       STATE      STOPPED AT
 inst-1739893456789012345       web             enabled      running    -
 inst-1739893456789054321       worker          disabled     stopped    2026-02-19T10:30:00Z
 
-$ aegis instance list --stopped
+$ ovm instance list --stopped
 ID                             HANDLE          STATUS       STATE      STOPPED AT
 inst-1739893456789054321       worker          disabled     stopped    2026-02-19T10:30:00Z
 ```
 
 ---
 
-### aegis instance info
+### ovm instance info
 
 Show detailed information about an instance.
 
 ```
-aegis instance info HANDLE_OR_ID
+ovm instance info HANDLE_OR_ID
 ```
 
 Accepts either a handle alias or instance ID.
@@ -266,20 +266,20 @@ Accepts either a handle alias or instance ID.
 **Examples:**
 
 ```
-$ aegis instance info my-agent
+$ ovm instance info my-agent
 Handle:      my-agent
 ID:          inst-1739893456789012345
 State:       running
 Enabled:     true
 Image:       python:3.12-alpine
 Kit:         agent
-Command:     aegis-agent
+Command:     ovm-agent
 Gateway:     running
 Connections: 0
 Created:     2026-02-19T10:30:00Z
 Last Active: 2026-02-19T10:35:00Z
 
-$ aegis instance info web
+$ ovm instance info web
 Handle:      web
 ID:          inst-1739893456789054321
 State:       running
@@ -300,29 +300,29 @@ Kit:         agent (not installed)
 
 ---
 
-### aegis instance disable
+### ovm instance disable
 
 Disable an instance. Sets Enabled=false, stops the VM, closes all port
 listeners, and prevents wake-on-connect. The instance remains in the list with
-state STOPPED and logs are preserved. Use `aegis instance start --name` to
-re-enable, or `aegis instance delete` to remove entirely.
+state STOPPED and logs are preserved. Use `ovm instance start --name` to
+re-enable, or `ovm instance delete` to remove entirely.
 
 A disabled instance is completely unreachable — no ingress, no auto-wake, no
 exec, no log streaming.
 
 ```
-aegis instance disable HANDLE_OR_ID
+ovm instance disable HANDLE_OR_ID
 ```
 
 ---
 
-### aegis instance delete
+### ovm instance delete
 
 Delete an instance entirely. Stops the VM (if running), removes from the
 instance list, and cleans up logs.
 
 ```
-aegis instance delete HANDLE_OR_ID
+ovm instance delete HANDLE_OR_ID
 ```
 
 ---
@@ -333,46 +333,46 @@ aegis instance delete HANDLE_OR_ID
 |-----------|--------|----------|----------|------------|-------------|
 | Process exits naturally | STOPPED | Yes | Yes | Yes | No |
 | Idle timeout (StopAfterIdle) | STOPPED | Yes | Yes | Yes | No |
-| `aegis instance disable` | STOPPED | **No** | Yes | Yes | No |
-| `aegis instance pause` | PAUSED | Yes | Yes | Yes | Suspended |
-| `aegis instance delete` | Removed | - | No | No | No |
-| `aegis run` + Ctrl+C | Deleted | - | No | No | No |
+| `ovm instance disable` | STOPPED | **No** | Yes | Yes | No |
+| `ovm instance pause` | PAUSED | Yes | Yes | Yes | Suspended |
+| `ovm instance delete` | Removed | - | No | No | No |
+| `ovm run` + Ctrl+C | Deleted | - | No | No | No |
 
 **Enabled** instances retain their config and auto-wake on incoming connections
 (wake-on-connect). **Disabled** instances are unreachable — no ingress, no
-auto-wake, no exec, no logs. Use `aegis instance start --name <handle>` to
-re-enable a disabled instance. Use `aegis instance prune` to clean up old
+auto-wake, no exec, no logs. Use `ovm instance start --name <handle>` to
+re-enable a disabled instance. Use `ovm instance prune` to clean up old
 stopped instances. `delete` is permanent — the instance and its logs are gone.
 
 ---
 
-### aegis instance pause
+### ovm instance pause
 
 Pause a running instance (SIGSTOP).
 
 ```
-aegis instance pause HANDLE_OR_ID
+ovm instance pause HANDLE_OR_ID
 ```
 
 ---
 
-### aegis instance resume
+### ovm instance resume
 
 Resume a paused instance (SIGCONT).
 
 ```
-aegis instance resume HANDLE_OR_ID
+ovm instance resume HANDLE_OR_ID
 ```
 
 ---
 
-### aegis instance prune
+### ovm instance prune
 
 Remove stopped instances older than a threshold. User-invoked cleanup —
 no background GC. Workspaces are never deleted by prune.
 
 ```
-aegis instance prune --stopped-older-than DURATION
+ovm instance prune --stopped-older-than DURATION
 ```
 
 Duration supports `h` (hours) and `d` (days). Default: `7d`.
@@ -380,7 +380,7 @@ Duration supports `h` (hours) and `d` (days). Default: `7d`.
 **Example:**
 
 ```
-$ aegis instance prune --stopped-older-than 7d
+$ ovm instance prune --stopped-older-than 7d
 Pruned 3 stopped instance(s)
 ```
 
@@ -391,10 +391,10 @@ Pruned 3 stopped instance(s)
 Execute a command inside a running instance. No SSH required -- uses the
 existing control channel.
 
-### aegis exec
+### ovm exec
 
 ```
-aegis exec HANDLE_OR_ID -- COMMAND [ARGS...]
+ovm exec HANDLE_OR_ID -- COMMAND [ARGS...]
 ```
 
 **Arguments:**
@@ -412,11 +412,11 @@ Returns 409 if the instance is STOPPED or DISABLED.
 
 ```
 # Exec by handle
-$ aegis exec web -- echo hello
+$ ovm exec web -- echo hello
 hello
 
 # Exec by instance ID
-$ aegis exec inst-1739893456789012345 -- ls /workspace
+$ ovm exec inst-1739893456789012345 -- ls /workspace
 data/
 output/
 ```
@@ -426,12 +426,12 @@ output/
 ## Log Commands
 
 Stream instance logs. Logs are captured from the moment the VM starts
-and persisted to `~/.aegis/data/logs/`.
+and persisted to `~/.omnivm/data/logs/`.
 
-### aegis logs
+### ovm logs
 
 ```
-aegis logs HANDLE_OR_ID [--follow]
+ovm logs HANDLE_OR_ID [--follow]
 ```
 
 **Arguments:**
@@ -452,7 +452,7 @@ primary process output has no prefix.
 **Example:**
 
 ```
-$ aegis logs web --follow
+$ ovm logs web --follow
 Serving HTTP on 0.0.0.0 port 80 ...
 127.0.0.1 - - [19/Feb/2026 10:35:12] "GET / HTTP/1.1" 200 -
 ```
@@ -466,14 +466,14 @@ rest. Secrets are injected as env vars only when explicitly requested via
 `--secret KEY` or `--secret '*'` (all secrets). Default: none injected. Values are never
 displayed by any list command.
 
-Run `aegis secret help` to print subcommand usage.
+Run `ovm secret help` to print subcommand usage.
 
-### aegis secret set
+### ovm secret set
 
 Set a secret (creates or updates).
 
 ```
-aegis secret set KEY VALUE
+ovm secret set KEY VALUE
 ```
 
 Sends `PUT /v1/secrets/{key}`.
@@ -481,24 +481,24 @@ Sends `PUT /v1/secrets/{key}`.
 **Example:**
 
 ```
-$ aegis secret set API_KEY sk-test123
+$ ovm secret set API_KEY sk-test123
 Secret API_KEY set
 ```
 
 ---
 
-### aegis secret list
+### ovm secret list
 
 List secret names. Values are never shown.
 
 ```
-aegis secret list
+ovm secret list
 ```
 
 **Example:**
 
 ```
-$ aegis secret list
+$ ovm secret list
 Secrets:
   API_KEY
   DB_PASSWORD
@@ -506,12 +506,12 @@ Secrets:
 
 ---
 
-### aegis secret delete
+### ovm secret delete
 
 Delete a secret.
 
 ```
-aegis secret delete KEY
+ovm secret delete KEY
 ```
 
 Sends `DELETE /v1/secrets/{key}`.
@@ -519,7 +519,7 @@ Sends `DELETE /v1/secrets/{key}`.
 **Example:**
 
 ```
-$ aegis secret delete API_KEY
+$ ovm secret delete API_KEY
 Secret API_KEY deleted
 ```
 
@@ -527,17 +527,17 @@ Secret API_KEY deleted
 
 ## Kit Commands
 
-Manage kits — optional add-on bundles that extend AegisVM with specific
-capabilities. Kit manifests live at `~/.aegis/kits/<name>.json`.
+Manage kits — optional add-on bundles that extend OmniVM with specific
+capabilities. Kit manifests live at `~/.omnivm/kits/<name>.json`.
 
-Run `aegis kit help` to print subcommand usage.
+Run `ovm kit help` to print subcommand usage.
 
-### aegis kit list
+### ovm kit list
 
 List installed kits with validation status.
 
 ```
-aegis kit list
+ovm kit list
 ```
 
 Shows each kit's name, version, status, and description. Status is `ok` if all
@@ -547,19 +547,19 @@ missing binaries.
 **Examples:**
 
 ```
-$ aegis kit list
+$ ovm kit list
 NAME         VERSION    STATUS     DESCRIPTION
 agent        v0.4.0     ok         Messaging-driven LLM agent with Telegram integration
 
-$ aegis kit list
+$ ovm kit list
 NAME         VERSION    STATUS     DESCRIPTION
-agent        v0.4.0     broken     Messaging-driven LLM agent (missing: aegis-agent)
+agent        v0.4.0     broken     Messaging-driven LLM agent (missing: ovm-agent)
 ```
 
 No kits installed:
 
 ```
-$ aegis kit list
+$ ovm kit list
 No kits installed.
 ```
 
@@ -567,15 +567,15 @@ No kits installed.
 
 ## UI Command
 
-### aegis ui
+### ovm ui
 
 Start the web UI for managing instances, secrets, and kit configuration.
 
 ```
-aegis ui [--port PORT]
+ovm ui [--port PORT]
 ```
 
-Opens a browser to `http://localhost:7700` (default). The UI proxies API requests to aegisd via the unix socket. If aegisd is not running, it is started automatically.
+Opens a browser to `http://localhost:7700` (default). The UI proxies API requests to ovmd via the unix socket. If ovmd is not running, it is started automatically.
 
 | Flag | Description |
 |---|---|
@@ -592,8 +592,8 @@ Opens a browser to `http://localhost:7700` (default). The UI proxies API request
 **Examples:**
 
 ```bash
-aegis ui              # default port 7700
-aegis ui --port 9090  # custom port
+ovm ui              # default port 7700
+ovm ui --port 9090  # custom port
 ```
 
 ---
@@ -602,12 +602,12 @@ aegis ui --port 9090  # custom port
 
 Manage the MCP (Model Context Protocol) server integration with Claude Code.
 
-### aegis mcp install
+### ovm mcp install
 
-Register `aegis-mcp` as an MCP server in Claude Code.
+Register `ovm-mcp` as an MCP server in Claude Code.
 
 ```
-aegis mcp install [--project]
+ovm mcp install [--project]
 ```
 
 By default, registers with `user` scope (available across all projects). Pass
@@ -616,20 +616,20 @@ By default, registers with `user` scope (available across all projects). Pass
 **Example:**
 
 ```
-$ aegis mcp install
-aegis MCP server registered in Claude Code
-  binary: /opt/homebrew/bin/aegis-mcp
+$ ovm mcp install
+ovm MCP server registered in Claude Code
+  binary: /opt/homebrew/bin/ovm-mcp
   scope:  user
 ```
 
 ---
 
-### aegis mcp uninstall
+### ovm mcp uninstall
 
-Remove the `aegis-mcp` server from Claude Code.
+Remove the `ovm-mcp` server from Claude Code.
 
 ```
-aegis mcp uninstall
+ovm mcp uninstall
 ```
 
 ---
@@ -638,24 +638,24 @@ aegis mcp uninstall
 
 | Command | Description |
 |---|---|
-| `aegis up` | Start daemon (kit daemons are per-instance, managed by aegisd) |
-| `aegis down` | Stop daemon (stops all kit daemons and VMs) |
-| `aegis status` | Show daemon status |
-| `aegis doctor` | Diagnose environment |
-| `aegis run [...] -- CMD` | Ephemeral: start + follow + delete |
-| `aegis instance start` | Start new or re-enable stopped/disabled instance |
-| `aegis instance list` | List instances (`--stopped`, `--running`) |
-| `aegis instance info` | Show instance details |
-| `aegis instance disable` | Disable an instance (stop VM, close listeners, prevent auto-wake) |
-| `aegis instance delete` | Delete an instance (removed entirely) |
-| `aegis instance pause` | Pause an instance |
-| `aegis instance resume` | Resume an instance |
-| `aegis instance prune` | Remove stale stopped instances |
-| `aegis exec` | Execute command in instance |
-| `aegis logs` | Stream instance logs |
-| `aegis secret set` | Set a secret |
-| `aegis secret list` | List secret names |
-| `aegis secret delete` | Delete a secret |
-| `aegis kit list` | List installed kits |
-| `aegis mcp install` | Register MCP server in Claude Code |
-| `aegis mcp uninstall` | Remove MCP server from Claude Code |
+| `ovm up` | Start daemon (kit daemons are per-instance, managed by ovmd) |
+| `ovm down` | Stop daemon (stops all kit daemons and VMs) |
+| `ovm status` | Show daemon status |
+| `ovm doctor` | Diagnose environment |
+| `ovm run [...] -- CMD` | Ephemeral: start + follow + delete |
+| `ovm instance start` | Start new or re-enable stopped/disabled instance |
+| `ovm instance list` | List instances (`--stopped`, `--running`) |
+| `ovm instance info` | Show instance details |
+| `ovm instance disable` | Disable an instance (stop VM, close listeners, prevent auto-wake) |
+| `ovm instance delete` | Delete an instance (removed entirely) |
+| `ovm instance pause` | Pause an instance |
+| `ovm instance resume` | Resume an instance |
+| `ovm instance prune` | Remove stale stopped instances |
+| `ovm exec` | Execute command in instance |
+| `ovm logs` | Stream instance logs |
+| `ovm secret set` | Set a secret |
+| `ovm secret list` | List secret names |
+| `ovm secret delete` | Delete a secret |
+| `ovm kit list` | List installed kits |
+| `ovm mcp install` | Register MCP server in Claude Code |
+| `ovm mcp uninstall` | Remove MCP server from Claude Code |

@@ -25,7 +25,7 @@ func skipIfNotLinux(t *testing.T) {
 func TestLinux_RunEcho(t *testing.T) {
 	skipIfNotLinux(t)
 
-	out := aegisRun(t, "run", "--", "echo", "linux-ch-echo")
+	out := ovmRun(t, "run", "--", "echo", "linux-ch-echo")
 	if !strings.Contains(out, "linux-ch-echo") {
 		t.Fatalf("expected 'linux-ch-echo' in output, got: %s", out)
 	}
@@ -56,7 +56,7 @@ func TestLinux_PauseResume(t *testing.T) {
 	waitForState(t, id, "running", 10*time.Second)
 
 	// Verify VM is still functional after resume
-	out := aegisExec(t, id, "echo", "after-resume")
+	out := ovmExec(t, id, "echo", "after-resume")
 	if !strings.Contains(out, "after-resume") {
 		t.Fatalf("exec after resume failed, got: %s", out)
 	}
@@ -78,7 +78,7 @@ func TestLinux_StopStart(t *testing.T) {
 
 	waitForState(t, id, "running", 60*time.Second)
 
-	out := aegisExec(t, id, "echo", "before-stop")
+	out := ovmExec(t, id, "echo", "before-stop")
 	if !strings.Contains(out, "before-stop") {
 		t.Fatalf("exec before stop failed, got: %s", out)
 	}
@@ -91,7 +91,7 @@ func TestLinux_StopStart(t *testing.T) {
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/start", id), nil)
 	waitForState(t, id, "running", 60*time.Second)
 
-	out = aegisExec(t, id, "echo", "after-restart")
+	out = ovmExec(t, id, "echo", "after-restart")
 	if !strings.Contains(out, "after-restart") {
 		t.Fatalf("exec after restart failed, got: %s", out)
 	}
@@ -111,13 +111,13 @@ func TestLinux_TapNetworking(t *testing.T) {
 	waitForState(t, id, "running", 60*time.Second)
 
 	// Check that eth0 is configured with an IP
-	out := aegisExec(t, id, "ip", "addr", "show", "eth0")
+	out := ovmExec(t, id, "ip", "addr", "show", "eth0")
 	if !strings.Contains(out, "172.16.") {
 		t.Fatalf("expected 172.16.x.x IP on eth0, got: %s", out)
 	}
 
 	// Check that the default route is set
-	out = aegisExec(t, id, "ip", "route", "show", "default")
+	out = ovmExec(t, id, "ip", "route", "show", "default")
 	if !strings.Contains(out, "172.16.") {
 		t.Fatalf("expected default route via 172.16.x.x, got: %s", out)
 	}
@@ -159,4 +159,4 @@ func TestLinux_DirectIngress(t *testing.T) {
 	t.Log("direct tap ingress working")
 }
 
-// aegisExec is defined in guest_api_test.go — reused here.
+// ovmExec is defined in guest_api_test.go — reused here.

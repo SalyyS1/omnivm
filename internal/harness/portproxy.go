@@ -30,13 +30,13 @@ type portProxy struct {
 
 // startPortProxies starts a TCP proxy for each exposed guest port after a delay.
 // Each proxy listens on guestIP:port and forwards to 127.0.0.1:port.
-// The guest IP is read from AEGIS_NET_IP (e.g. "192.168.127.2/24").
+// The guest IP is read from OVM_NET_IP (e.g. "192.168.127.2/24").
 //
 // Retries binding periodically. On each attempt:
 //   - If guestIP:port binds → proxy runs (app is on localhost, proxy bridges)
 //   - If EADDRINUSE → app has 0.0.0.0, no proxy needed, stop retrying
 //
-// Returns nil if not in gvproxy mode (no AEGIS_NET_IP set).
+// Returns nil if not in gvproxy mode (no OVM_NET_IP set).
 func startPortProxies(ports []int) *portProxy {
 	guestIP := guestIPFromEnv()
 	if guestIP == "" {
@@ -103,10 +103,10 @@ func (pp *portProxy) tryBind(guestIP string, port int) {
 	log.Printf("portproxy: gave up on port %d after retries", port)
 }
 
-// guestIPFromEnv extracts the IP address (without prefix length) from AEGIS_NET_IP.
+// guestIPFromEnv extracts the IP address (without prefix length) from OVM_NET_IP.
 // Returns "" if not set (TSI mode).
 func guestIPFromEnv() string {
-	cidr := os.Getenv("AEGIS_NET_IP")
+	cidr := os.Getenv("OVM_NET_IP")
 	if cidr == "" {
 		return ""
 	}

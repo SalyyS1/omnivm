@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/version"
 )
 
 // JSON-RPC 2.0 message types
@@ -125,8 +125,8 @@ func (pt *processTracker) killAll() {
 }
 
 // harnessRPC provides bidirectional JSON-RPC over the control channel.
-// It handles incoming requests from aegisd (run, exec, etc.) AND supports
-// sending requests TO aegisd for the guest API (guest.spawn, etc.).
+// It handles incoming requests from ovmd (run, exec, etc.) AND supports
+// sending requests TO ovmd for the guest API (guest.spawn, etc.).
 type harnessRPC struct {
 	conn    net.Conn
 	mu      sync.Mutex // serializes writes to conn
@@ -134,7 +134,7 @@ type harnessRPC struct {
 	nextID  int64
 
 	// capabilityToken is stored from the run RPC params.
-	// Attached to all guest API → aegisd requests automatically.
+	// Attached to all guest API → ovmd requests automatically.
 	capabilityToken string
 
 	// portProxy is the active port proxy (set during handleRun).
@@ -149,11 +149,11 @@ func newHarnessRPC(conn net.Conn) *harnessRPC {
 	return &harnessRPC{conn: conn}
 }
 
-// Call sends an RPC request to aegisd and waits for the response.
+// Call sends an RPC request to ovmd and waits for the response.
 // Used by the guest API server to forward spawn/list/stop requests.
 func (h *harnessRPC) Call(method string, params interface{}) (json.RawMessage, error) {
 	h.nextID++
-	// Use string IDs to avoid collision with aegisd's numeric IDs
+	// Use string IDs to avoid collision with ovmd's numeric IDs
 	id := fmt.Sprintf("g-%d", h.nextID)
 
 	respCh := make(chan json.RawMessage, 1)
@@ -217,9 +217,9 @@ func (h *harnessRPC) dispatchResponse(id interface{}, msg []byte) {
 
 // handleConnection processes JSON-RPC messages from a single host connection.
 // Messages are classified as:
-//   - Request from aegisd (has method + id): dispatched to request handler
+//   - Request from ovmd (has method + id): dispatched to request handler
 //   - Response to our call (has id, no method): dispatched to pending Call()
-//   - Notification (has method, no id): currently unused from aegisd→harness direction
+//   - Notification (has method, no id): currently unused from ovmd→harness direction
 func handleConnection(ctx context.Context, conn net.Conn, hrpc *harnessRPC) {
 	defer conn.Close()
 
@@ -251,7 +251,7 @@ func handleConnection(ctx context.Context, conn net.Conn, hrpc *harnessRPC) {
 		}
 
 		if msg.ID != nil && msg.Method == "" {
-			// Response to one of our outgoing calls (guest API → aegisd)
+			// Response to one of our outgoing calls (guest API → ovmd)
 			hrpc.dispatchResponse(msg.ID, line)
 			continue
 		}
@@ -260,7 +260,7 @@ func handleConnection(ctx context.Context, conn net.Conn, hrpc *harnessRPC) {
 			continue
 		}
 
-		// Notification from aegisd (no ID)
+		// Notification from ovmd (no ID)
 		if msg.ID == nil {
 			switch msg.Method {
 			case "tether.frame":
@@ -273,7 +273,7 @@ func handleConnection(ctx context.Context, conn net.Conn, hrpc *harnessRPC) {
 			continue
 		}
 
-		// Request from aegisd — dispatch to handler
+		// Request from ovmd — dispatch to handler
 		var req rpcRequest
 		json.Unmarshal(line, &req)
 
@@ -416,7 +416,7 @@ func handleRun(ctx context.Context, req *rpcRequest, conn net.Conn, tracker *pro
 		}
 	}
 
-	// Start activity monitor — sends periodic heartbeats to aegisd when the
+	// Start activity monitor — sends periodic heartbeats to ovmd when the
 	// guest has outbound connections, CPU usage, or network traffic.
 	go monitorActivity(ctx, cmd.Process.Pid, conn, hrpc)
 
@@ -432,7 +432,7 @@ func handleRun(ctx context.Context, req *rpcRequest, conn net.Conn, tracker *pro
 }
 
 // monitorActivity periodically checks guest activity and sends "activity"
-// notifications to aegisd. Only sends when activity is detected — silence
+// notifications to ovmd. Only sends when activity is detected — silence
 // means idle, which lets the idle timer run naturally.
 func monitorActivity(ctx context.Context, pid int, conn net.Conn, hrpc *harnessRPC) {
 	// Baseline samples for deltas
@@ -683,7 +683,7 @@ func tetherPersistFrame(params json.RawMessage) {
 	f.Write([]byte("\n"))
 }
 
-// handlePortsChanged handles a ports_changed notification from aegisd.
+// handlePortsChanged handles a ports_changed notification from ovmd.
 // This is sent when the HOST exposes or unexposes a port on a running instance.
 // The harness starts/stops the local port proxy accordingly.
 func handlePortsChanged(params json.RawMessage, hrpc *harnessRPC) {

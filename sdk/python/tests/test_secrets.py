@@ -1,8 +1,8 @@
-"""Tests for aegis.secrets."""
+"""Tests for omnivm.secrets."""
 
 import pytest
 
-from aegis.secrets import AegisSecretError, get_secret, require_secret
+from omnivm.secrets import OmniVMSecretError, get_secret, require_secret
 
 
 def test_get_secret_returns_value(monkeypatch):
@@ -22,15 +22,15 @@ def test_require_secret_returns_value(monkeypatch):
 
 def test_require_secret_raises_when_missing(monkeypatch):
     monkeypatch.delenv("MISSING_SECRET", raising=False)
-    with pytest.raises(AegisSecretError) as exc_info:
+    with pytest.raises(OmniVMSecretError) as exc_info:
         require_secret("MISSING_SECRET")
     assert "MISSING_SECRET" in str(exc_info.value)
 
 
 def test_require_secret_error_message_includes_guidance(monkeypatch):
     monkeypatch.delenv("SOME_KEY", raising=False)
-    with pytest.raises(AegisSecretError) as exc_info:
+    with pytest.raises(OmniVMSecretError) as exc_info:
         require_secret("SOME_KEY")
     msg = str(exc_info.value)
     assert "SOME_KEY" in msg
-    assert "aegis secret set" in msg
+    assert "omnivm secret set" in msg

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/logstore"
-	"github.com/xfeldman/aegisvm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
 // mockVMM implements vmm.VMM for lifecycle integration tests.
@@ -148,7 +148,7 @@ func newTestManagerWithVMM(v vmm.VMM) *Manager {
 		PauseAfterIdle:  60 * time.Second,
 		StopAfterIdle:   20 * time.Minute,
 	}
-	dir, _ := os.MkdirTemp("", "aegis-test-logs-*")
+	dir, _ := os.MkdirTemp("", "ovm-test-logs-*")
 	ls := logstore.NewStore(dir)
 	return NewManager(v, cfg, ls, nil, nil)
 }

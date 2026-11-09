@@ -1,11 +1,11 @@
-// aegis-mcp-guest is an MCP server that runs inside Aegis VMs, allowing
+// ovm-mcp-guest is an MCP server that runs inside OmniVM VMs, allowing
 // LLM agents to spawn and manage child instances via the Guest Orchestration API.
 //
 // It communicates over stdio (JSON-RPC 2.0) and calls the Guest API on
 // http://127.0.0.1:7777. No authentication is needed — the harness handles it.
 //
 // This binary is included in the VM rootfs alongside the harness.
-// Agents invoke it via: aegis-mcp-guest (stdin/stdout MCP protocol)
+// Agents invoke it via: ovm-mcp-guest (stdin/stdout MCP protocol)
 package main
 
 import (
@@ -17,7 +17,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/xfeldman/aegisvm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/version"
 )
 
 // Guest API base URL (harness-provided HTTP server inside the VM)
@@ -352,11 +352,11 @@ func main() {
 		case "initialize":
 			result = mcpInitResult{
 				ProtocolVersion: "2024-11-05",
-				ServerInfo:      mcpServerInfo{Name: "aegis-guest", Version: version.Version()},
+				ServerInfo:      mcpServerInfo{Name: "ovm-guest", Version: version.Version()},
 				Capabilities:    mcpCapabilities{Tools: &struct{}{}},
-				Instructions: `Aegis Guest Orchestration — spawn and manage child VM instances from inside this VM.
+				Instructions: `OmniVM Guest Orchestration — spawn and manage child VM instances from inside this VM.
 
-You are running inside an Aegis microVM. The Guest API lets you create child instances for separate workloads:
+You are running inside an OmniVM microVM. The Guest API lets you create child instances for separate workloads:
 - Use instance_spawn to start a new VM (build projects, run servers, execute tests)
 - Each child gets its own isolated environment, network, and filesystem
 - Children are automatically stopped when this VM stops

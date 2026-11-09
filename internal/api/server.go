@@ -16,19 +16,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/blob"
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/lifecycle"
-	"github.com/xfeldman/aegisvm/internal/logstore"
-	"github.com/xfeldman/aegisvm/internal/registry"
-	"github.com/xfeldman/aegisvm/internal/router"
-	"github.com/xfeldman/aegisvm/internal/secrets"
-	"github.com/xfeldman/aegisvm/internal/tether"
-	"github.com/xfeldman/aegisvm/internal/version"
-	"github.com/xfeldman/aegisvm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/blob"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/lifecycle"
+	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/registry"
+	"github.com/SalyyS1/omnivm/internal/router"
+	"github.com/SalyyS1/omnivm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
-// Server is the aegisd HTTP API server.
+// Server is the ovmd HTTP API server.
 type Server struct {
 	cfg         *config.Config
 	vmm         vmm.VMM
@@ -112,10 +112,10 @@ func (s *Server) Start() error {
 	s.ln = ln
 
 	// Socket permissions: default (0755 from net.Listen) is fine.
-	// When running via sudo, chownToInvokingUser() in aegisd makes the
+	// When running via sudo, chownToInvokingUser() in ovmd makes the
 	// socket user-owned, so the CLI can connect without permission hacks.
 
-	log.Printf("aegisd API listening on %s", s.cfg.SocketPath)
+	log.Printf("ovmd API listening on %s", s.cfg.SocketPath)
 
 	go func() {
 		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -1699,7 +1699,7 @@ func (s *Server) resolveEnv(secretKeys []string, explicitEnv map[string]string) 
 }
 
 // resolveWorkspace resolves a workspace argument to an absolute path.
-// Named workspaces (no / or . prefix) resolve to ~/.aegis/data/workspaces/<name>.
+// Named workspaces (no / or . prefix) resolve to ~/.omnivm/data/workspaces/<name>.
 // Path workspaces resolve to their absolute path.
 func (s *Server) resolveWorkspace(ws string) string {
 	if !strings.Contains(ws, "/") && !strings.HasPrefix(ws, ".") {

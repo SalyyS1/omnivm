@@ -12,12 +12,12 @@ import (
 )
 
 // Backend conformance: exercises the core instance lifecycle paths that any
-// VMM backend must support. These tests run against whatever backend aegisd
+// VMM backend must support. These tests run against whatever backend ovmd
 // was started with (Cloud Hypervisor).
 
 // TestConformance_RunEcho — boot VM, run command, verify output, instance stops.
 func TestConformance_RunEcho(t *testing.T) {
-	out := aegisRun(t, "run", "--", "echo", "conformance-echo")
+	out := ovmRun(t, "run", "--", "echo", "conformance-echo")
 	if !strings.Contains(out, "conformance-echo") {
 		t.Fatalf("expected 'conformance-echo' in output, got: %s", out)
 	}
@@ -25,7 +25,7 @@ func TestConformance_RunEcho(t *testing.T) {
 
 // TestConformance_RunExitCode — verify non-zero exit code propagation.
 func TestConformance_RunExitCode(t *testing.T) {
-	_, err := aegis("run", "--", "sh", "-c", "exit 42")
+	_, err := ovm("run", "--", "sh", "-c", "exit 42")
 	if err == nil {
 		t.Fatal("expected non-zero exit, got success")
 	}
@@ -48,7 +48,7 @@ func TestConformance_InstanceStartStop(t *testing.T) {
 
 	// Verify gone from list
 	client := daemonClient()
-	resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s", id))
+	resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s", id))
 	if err == nil {
 		resp.Body.Close()
 		if resp.StatusCode == 200 {
@@ -69,7 +69,7 @@ func TestConformance_InstanceList(t *testing.T) {
 	waitForState(t, id, "running", 30*time.Second)
 
 	client := daemonClient()
-	resp, err := client.Get("http://aegis/v1/instances")
+	resp, err := client.Get("http://ovm/v1/instances")
 	if err != nil {
 		t.Fatalf("list instances: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestConformance_Exec(t *testing.T) {
 	client := daemonClient()
 	body := `{"command":["echo","exec-output"]}`
 	resp, err := client.Post(
-		fmt.Sprintf("http://aegis/v1/instances/%s/exec", id),
+		fmt.Sprintf("http://ovm/v1/instances/%s/exec", id),
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -160,7 +160,7 @@ func TestConformance_Logs(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	client := daemonClient()
-	resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	if err != nil {
 		t.Fatalf("get logs: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestConformance_LogsExecSource(t *testing.T) {
 	client := daemonClient()
 	body := `{"command":["echo","exec-src-line"]}`
 	resp, err := client.Post(
-		fmt.Sprintf("http://aegis/v1/instances/%s/exec", id),
+		fmt.Sprintf("http://ovm/v1/instances/%s/exec", id),
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -200,7 +200,7 @@ func TestConformance_LogsExecSource(t *testing.T) {
 
 	// Read instance logs, look for exec source
 	time.Sleep(1 * time.Second)
-	logsResp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	logsResp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	if err != nil {
 		t.Fatalf("get logs: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestConformance_ProcessExited(t *testing.T) {
 	// Verify system log entry
 	time.Sleep(500 * time.Millisecond)
 	client := daemonClient()
-	resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	if err != nil {
 		t.Fatalf("get logs: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestConformance_ExecStopped409(t *testing.T) {
 	client := daemonClient()
 	body := `{"command":["echo","fail"]}`
 	resp, err := client.Post(
-		fmt.Sprintf("http://aegis/v1/instances/%s/exec", id),
+		fmt.Sprintf("http://ovm/v1/instances/%s/exec", id),
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -300,7 +300,7 @@ func TestConformance_HandleResolution(t *testing.T) {
 	client := daemonClient()
 	body := `{"command":["echo","handle-exec"]}`
 	resp, err := client.Post(
-		"http://aegis/v1/instances/conf-handle/exec",
+		"http://ovm/v1/instances/conf-handle/exec",
 		"application/json",
 		strings.NewReader(body),
 	)
@@ -347,9 +347,9 @@ func TestConformance_PauseResume(t *testing.T) {
 	}
 }
 
-// TestConformance_CLIRun — aegis run -- echo hello exits with 0.
+// TestConformance_CLIRun — ovm run -- echo hello exits with 0.
 func TestConformance_CLIRun(t *testing.T) {
-	out := aegisRun(t, "run", "--", "echo", "cli-run-test")
+	out := ovmRun(t, "run", "--", "echo", "cli-run-test")
 	if !strings.Contains(out, "cli-run-test") {
 		t.Fatalf("expected 'cli-run-test', got: %s", out)
 	}
@@ -363,7 +363,7 @@ func TestConformance_SecretSetListDelete(t *testing.T) {
 
 	// List — both should appear
 	client := daemonClient()
-	resp, err := client.Get("http://aegis/v1/secrets")
+	resp, err := client.Get("http://ovm/v1/secrets")
 	if err != nil {
 		t.Fatalf("list secrets: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestConformance_SecretSetListDelete(t *testing.T) {
 	apiDelete(t, "/v1/secrets/CONF_KEY_A")
 
 	// List again — only B should remain
-	resp2, _ := client.Get("http://aegis/v1/secrets")
+	resp2, _ := client.Get("http://ovm/v1/secrets")
 	defer resp2.Body.Close()
 	data2, _ := io.ReadAll(resp2.Body)
 
@@ -413,7 +413,7 @@ func TestConformance_SecretScopingNone(t *testing.T) {
 	// Check logs — SCOPE_TEST should be empty
 	time.Sleep(500 * time.Millisecond)
 	client := daemonClient()
-	resp, _ := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, _ := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 
@@ -446,7 +446,7 @@ func TestConformance_SecretScopingAllowlist(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 	client := daemonClient()
-	resp, _ := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, _ := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	output := string(data)
@@ -480,7 +480,7 @@ func TestConformance_SecretScopingAll(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 	client := daemonClient()
-	resp, _ := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, _ := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	output := string(data)
@@ -508,7 +508,7 @@ func TestConformance_SecretEnvOverride(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 	client := daemonClient()
-	resp, _ := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s/logs", id))
+	resp, _ := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s/logs", id))
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	output := string(data)
@@ -527,7 +527,7 @@ func waitForState(t *testing.T, id, want string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	client := daemonClient()
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(fmt.Sprintf("http://aegis/v1/instances/%s", id))
+		resp, err := client.Get(fmt.Sprintf("http://ovm/v1/instances/%s", id))
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			continue

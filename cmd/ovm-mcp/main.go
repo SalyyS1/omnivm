@@ -1,6 +1,6 @@
-// aegis-mcp — MCP (Model Context Protocol) server for Aegis.
-// Exposes aegisd instance/secret management as MCP tools over stdio.
-// Talks to aegisd via the same unix socket HTTP API used by the CLI.
+// ovm-mcp — MCP (Model Context Protocol) server for OmniVM.
+// Exposes ovmd instance/secret management as MCP tools over stdio.
+// Talks to ovmd via the same unix socket HTTP API used by the CLI.
 package main
 
 import (
@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/blob"
-	"github.com/xfeldman/aegisvm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/blob"
+	"github.com/SalyyS1/omnivm/internal/version"
 )
 
 // --- JSON-RPC types ---
@@ -87,11 +87,11 @@ type mcpToolResult struct {
 	IsError bool         `json:"isError,omitempty"`
 }
 
-// --- aegisd HTTP client ---
+// --- ovmd HTTP client ---
 
 func socketPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".aegis", "aegisd.sock")
+	return filepath.Join(home, ".omnivm", "ovmd.sock")
 }
 
 func newHTTPClient() *http.Client {
@@ -108,7 +108,7 @@ func newHTTPClient() *http.Client {
 var client = newHTTPClient()
 
 func apiURL(path string) string {
-	return "http://aegis" + path
+	return "http://ovm" + path
 }
 
 // doRequest performs an HTTP request and returns the response body bytes.
@@ -131,7 +131,7 @@ func doRequest(method, path string, body interface{}) (int, []byte, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("aegisd connection failed: %w", err)
+		return 0, nil, fmt.Errorf("ovmd connection failed: %w", err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -1047,13 +1047,13 @@ func main() {
 			result = mcpInitializeResult{
 				ProtocolVersion: "2024-11-05",
 				ServerInfo: mcpServerInfo{
-					Name:    "aegisvm",
+					Name:    "omnivm",
 					Version: version.Version(),
 				},
 				Capabilities: mcpCapabilities{
 					Tools: &struct{}{},
 				},
-				Instructions: `AegisVM runs commands inside isolated Linux microVMs on the local machine.
+				Instructions: `OmniVM runs commands inside isolated Linux microVMs on the local machine.
 
 Key concepts:
 - Each instance is a lightweight VM running a single command. The VM runs Alpine Linux (ARM64).

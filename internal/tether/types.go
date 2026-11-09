@@ -1,5 +1,5 @@
 // Package tether defines the bidirectional framed message protocol between
-// host and guest for the Aegis Agent Kit.
+// host and guest for the OmniVM Agent Kit.
 //
 // Tether rides on the existing control channel (JSON-RPC 2.0 over vsock).
 // All frames are sent as "tether.frame" notifications. Direction is inferred

@@ -25,8 +25,8 @@ type sockaddrVM struct {
 }
 
 // dialVsock connects to the host via AF_VSOCK.
-// portStr is the vsock port number (from AEGIS_VSOCK_PORT env var).
-// cidStr is the vsock CID (from AEGIS_VSOCK_CID env var, default "2" = host).
+// portStr is the vsock port number (from OVM_VSOCK_PORT env var).
+// cidStr is the vsock CID (from OVM_VSOCK_CID env var, default "2" = host).
 func dialVsock(portStr, cidStr string) (net.Conn, error) {
 	port, err := strconv.Atoi(portStr)
 	if err != nil {

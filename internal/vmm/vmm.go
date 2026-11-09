@@ -118,7 +118,7 @@ func (c BackendCaps) String() string {
 		c.Name, c.Pause, c.RootFSType, c.NetworkBackend)
 }
 
-// ControlChannel is a message-oriented, bidirectional channel between aegisd
+// ControlChannel is a message-oriented, bidirectional channel between ovmd
 // and the guest harness. The underlying transport is backend-specific:
 //   - libkrun: TCP over TSI (harness connects outbound to host listener)
 //   - Cloud Hypervisor: vsock (host pre-creates unix socket, guest dials CID=2)
@@ -148,7 +148,7 @@ type ControlChannel interface {
 }
 
 // VMM is the virtual machine manager interface.
-// All aegisd core logic calls this interface — it never knows which backend is active.
+// All ovmd core logic calls this interface — it never knows which backend is active.
 type VMM interface {
 	// CreateVM creates a new VM with the given configuration.
 	// The VM is created but not started.

@@ -1,10 +1,10 @@
 # simple-node-server
 
-Demonstrates a long-running AegisVM agent: a Node.js HTTP server returning JSON, using only the standard library (no Express or other dependencies).
+Demonstrates a long-running OmniVM agent: a Node.js HTTP server returning JSON, using only the standard library (no Express or other dependencies).
 
 ## What this example shows
 
-- **Long-lived instance**: the server runs indefinitely, handling requests via the AegisVM router.
+- **Long-lived instance**: the server runs indefinitely, handling requests via the OmniVM router.
 - **JSON API**: returns a structured JSON response with status, secret presence, request path, and timestamp.
 - **Secrets injection**: reads `SECRET_KEY` from environment variables.
 - **Structured logging**: writes JSON log lines to stdout for each request.
@@ -12,9 +12,9 @@ Demonstrates a long-running AegisVM agent: a Node.js HTTP server returning JSON,
 ## Running
 
 ```bash
-aegis up
-aegis secret set SECRET_KEY my-secret-value
-aegis run --name node-demo --expose 80 --image node:22-alpine -- node server.js
+ovm up
+ovm secret set SECRET_KEY my-secret-value
+ovm run --name node-demo --expose 80 --image node:22-alpine -- node server.js
 ```
 
 In another terminal:

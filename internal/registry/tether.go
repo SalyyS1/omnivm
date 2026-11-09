@@ -3,7 +3,7 @@ package registry
 import (
 	"encoding/json"
 
-	"github.com/xfeldman/aegisvm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/tether"
 )
 
 // SaveTetherFrame persists a single tether frame to the database.

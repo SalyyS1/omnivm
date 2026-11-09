@@ -1,4 +1,4 @@
-// aegisd is the Aegis daemon — the local control plane for microVM management.
+// ovmd is the OmniVM daemon — the local control plane for microVM management.
 //
 // It listens on a unix socket and provides an HTTP API for instance management,
 // routing, and secret storage.
@@ -17,17 +17,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/api"
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/image"
-	"github.com/xfeldman/aegisvm/internal/lifecycle"
-	"github.com/xfeldman/aegisvm/internal/logstore"
-	"github.com/xfeldman/aegisvm/internal/overlay"
-	"github.com/xfeldman/aegisvm/internal/registry"
-	"github.com/xfeldman/aegisvm/internal/router"
-	"github.com/xfeldman/aegisvm/internal/secrets"
-	"github.com/xfeldman/aegisvm/internal/tether"
-	"github.com/xfeldman/aegisvm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/api"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/image"
+	"github.com/SalyyS1/omnivm/internal/lifecycle"
+	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/overlay"
+	"github.com/SalyyS1/omnivm/internal/registry"
+	"github.com/SalyyS1/omnivm/internal/router"
+	"github.com/SalyyS1/omnivm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("aegisd starting on %s/%s (backend: %s)", platform.OS, platform.Arch, platform.Backend)
+	log.Printf("ovmd starting on %s/%s (backend: %s)", platform.OS, platform.Arch, platform.Backend)
 
 	// Resolve network backend
 	cfg.ResolveNetworkBackend()
@@ -291,15 +291,15 @@ func main() {
 	}
 
 	// Write PID file
-	pidPath := cfg.DataDir + "/aegisd.pid"
+	pidPath := cfg.DataDir + "/ovmd.pid"
 	os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 	defer os.Remove(pidPath)
 
-	// When running via sudo, chown ~/.aegis/ to the invoking user so the CLI
+	// When running via sudo, chown ~/.omnivm/ to the invoking user so the CLI
 	// and user can access all files (socket, PID, DB) without sudo.
 	chownToInvokingUser(cfg)
 
-	log.Printf("aegisd ready (pid %d, socket %s, router %s)", os.Getpid(), cfg.SocketPath, cfg.RouterAddr)
+	log.Printf("ovmd ready (pid %d, socket %s, router %s)", os.Getpid(), cfg.SocketPath, cfg.RouterAddr)
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
@@ -324,10 +324,10 @@ func main() {
 	// Clean up socket
 	os.Remove(cfg.SocketPath)
 
-	log.Println("aegisd stopped")
+	log.Println("ovmd stopped")
 }
 
-// chownToInvokingUser recursively chowns ~/.aegis/ to the user who ran sudo.
+// chownToInvokingUser recursively chowns ~/.omnivm/ to the user who ran sudo.
 // No-op when not running as root or not invoked via sudo.
 func chownToInvokingUser(cfg *config.Config) {
 	if os.Geteuid() != 0 {
@@ -343,14 +343,14 @@ func chownToInvokingUser(cfg *config.Config) {
 		return
 	}
 
-	// Chown the aegis home directory and everything under it
-	aegisDir := filepath.Dir(cfg.SocketPath) // ~/.aegis
-	filepath.WalkDir(aegisDir, func(path string, d fs.DirEntry, err error) error {
+	// Chown the ovm home directory and everything under it
+	ovmDir := filepath.Dir(cfg.SocketPath) // ~/.omnivm
+	filepath.WalkDir(ovmDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip inaccessible
 		}
 		os.Chown(path, uid, gid)
 		return nil
 	})
-	log.Printf("chown %s → uid=%d gid=%d", aegisDir, uid, gid)
+	log.Printf("chown %s → uid=%d gid=%d", ovmDir, uid, gid)
 }

@@ -24,7 +24,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/lifecycle"
+	"github.com/SalyyS1/omnivm/internal/lifecycle"
 )
 
 // PublicEndpoint describes a router-owned public port mapping.
@@ -475,11 +475,11 @@ func (r *Router) handleWebSocket(w http.ResponseWriter, req *http.Request, targe
 
 // resolveInstance finds an instance for a request.
 // Resolution order:
-//  1. X-Aegis-Instance header → route to instance by ID or handle
+//  1. X-OmniVM-Instance header → route to instance by ID or handle
 //  2. Fall back to default instance if only one exists
 func (r *Router) resolveInstance(req *http.Request) *lifecycle.Instance {
-	// 1. Header-based routing: X-Aegis-Instance (ID or handle)
-	if instRef := req.Header.Get("X-Aegis-Instance"); instRef != "" {
+	// 1. Header-based routing: X-OmniVM-Instance (ID or handle)
+	if instRef := req.Header.Get("X-OmniVM-Instance"); instRef != "" {
 		if inst := r.lm.GetInstance(instRef); inst != nil {
 			return inst
 		}
@@ -492,7 +492,7 @@ func (r *Router) resolveInstance(req *http.Request) *lifecycle.Instance {
 		return r.lm.GetDefaultInstance()
 	}
 	if count > 1 {
-		log.Printf("router: ambiguous request to %s with %d instances — use X-Aegis-Instance header or per-port endpoints", req.URL.Path, count)
+		log.Printf("router: ambiguous request to %s with %d instances — use X-OmniVM-Instance header or per-port endpoints", req.URL.Path, count)
 	}
 	return nil
 }

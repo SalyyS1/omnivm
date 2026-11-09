@@ -16,7 +16,7 @@ import (
 // parseCmdlineEnv reads /proc/cmdline and sets environment variables from KEY=VALUE
 // tokens. Only sets vars that are not already in the environment. Some backends
 // pass env vars via kernel cmdline rather than inheriting them from the parent
-// process — this ensures AEGIS_* vars are available regardless of boot method.
+// process — this ensures OVM_* vars are available regardless of boot method.
 func parseCmdlineEnv() {
 	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
@@ -24,7 +24,7 @@ func parseCmdlineEnv() {
 	}
 
 	// Kernel cmdline env vars we care about
-	envPrefixes := []string{"AEGIS_", "PATH=", "HOME=", "TERM="}
+	envPrefixes := []string{"OVM_", "PATH=", "HOME=", "TERM="}
 
 	for _, token := range strings.Fields(string(data)) {
 		eqIdx := strings.IndexByte(token, '=')
@@ -58,10 +58,10 @@ func parseCmdlineEnv() {
 
 // mountWorkspace mounts the "workspace" virtiofs tag at /workspace.
 // Behavior depends on whether a workspace was configured by the host:
-//   - AEGIS_WORKSPACE=1 set → workspace was configured, mount failure is fatal
-//   - AEGIS_WORKSPACE not set → no workspace configured, skip silently
+//   - OVM_WORKSPACE=1 set → workspace was configured, mount failure is fatal
+//   - OVM_WORKSPACE not set → no workspace configured, skip silently
 func mountWorkspace() {
-	configured := os.Getenv("AEGIS_WORKSPACE") == "1"
+	configured := os.Getenv("OVM_WORKSPACE") == "1"
 
 	if !configured {
 		return
@@ -81,7 +81,7 @@ func mountWorkspace() {
 //  2. Configure networking and DNS
 //  3. Mount workspace (virtiofs) if configured
 func mountEssential() {
-	// Parse kernel cmdline for AEGIS_* env vars and standard env (PATH, HOME, TERM).
+	// Parse kernel cmdline for OVM_* env vars and standard env (PATH, HOME, TERM).
 	// Safety net for backends that pass env via kernel cmdline rather than process env.
 	parseCmdlineEnv()
 
@@ -112,7 +112,7 @@ func mountEssential() {
 		netlinkSetLinkUp(lo.Index)
 	}
 
-	// Configure network if AEGIS_NET_IP is set.
+	// Configure network if OVM_NET_IP is set.
 	// Must happen before /etc/resolv.conf setup since it may override DNS.
 	// Must happen before read-only remount since it writes to /etc.
 	setupNetwork()
@@ -149,12 +149,12 @@ func mountEssential() {
 }
 
 // runLocalStartScripts executes startup scripts from two locations:
-//  1. /workspace/.aegis/startup/*.start — recommended for agents (persists across rootfs rebuilds)
+//  1. /workspace/.omnivm/startup/*.start — recommended for agents (persists across rootfs rebuilds)
 //  2. /etc/local.d/*.start — Alpine convention fallback
 //
 // Scripts run in alphabetical order within each location. Non-executable files are skipped.
 func runLocalStartScripts() {
-	dirs := []string{"/workspace/.aegis/startup", "/etc/local.d"}
+	dirs := []string{"/workspace/.omnivm/startup", "/etc/local.d"}
 	for _, dir := range dirs {
 		entries, err := filepath.Glob(dir + "/*.start")
 		if err != nil || len(entries) == 0 {
@@ -177,20 +177,20 @@ func runLocalStartScripts() {
 	}
 }
 
-// setupNetwork configures eth0 when AEGIS_NET_IP is set.
-// In TSI mode (no AEGIS_NET_IP), this is a no-op.
+// setupNetwork configures eth0 when OVM_NET_IP is set.
+// In TSI mode (no OVM_NET_IP), this is a no-op.
 //
 // Uses netlink syscalls directly — no dependency on iproute2 or busybox in the
 // guest rootfs. This ensures networking works with any OCI image (Debian-slim,
 // Alpine, distroless, etc.).
 func setupNetwork() {
-	ip := os.Getenv("AEGIS_NET_IP")
-	gw := os.Getenv("AEGIS_NET_GW")
+	ip := os.Getenv("OVM_NET_IP")
+	gw := os.Getenv("OVM_NET_GW")
 	if ip == "" {
 		return // TSI mode, no network setup needed
 	}
 
-	dns := os.Getenv("AEGIS_NET_DNS")
+	dns := os.Getenv("OVM_NET_DNS")
 	if dns == "" {
 		dns = gw // default: gateway runs DNS (gvproxy built-in)
 	}

@@ -1,21 +1,21 @@
 # Router
 
-Canonical reference for the AegisVM ingress router embedded in aegisd.
+Canonical reference for the OmniVM ingress router embedded in ovmd.
 
 ---
 
 ## 1. Overview
 
-The router is a connection-aware lifecycle proxy embedded in aegisd. It provides two ingress paths:
+The router is a connection-aware lifecycle proxy embedded in ovmd. It provides two ingress paths:
 
 - **Main HTTP router** (`127.0.0.1:8099`) — handle-based routing with HTTP reverse proxy and WebSocket support
 - **Per-port TCP proxies** — one listener per `--expose` port per instance, L4 TCP relay with wake-on-connect
 
-Both paths share the same core: ensure instance is running, dial the VMM backend, relay traffic. The router is not a separate process — it runs inside the aegisd daemon.
+Both paths share the same core: ensure instance is running, dial the VMM backend, relay traffic. The router is not a separate process — it runs inside the ovmd daemon.
 
 ### Always-proxy architecture
 
-All user-facing ports are owned by the router, not by the VMM. When you run `aegis instance start --expose 80`, the router allocates a host port (e.g., `:52000`) and starts listening on it immediately. The VMM still allocates an internal port for TSI forwarding, but users never see it.
+All user-facing ports are owned by the router, not by the VMM. When you run `ovm instance start --expose 80`, the router allocates a host port (e.g., `:52000`) and starts listening on it immediately. The VMM still allocates an internal port for TSI forwarding, but users never see it.
 
 This design ensures wake-on-connect works on every exposed port, even when the VM is paused (SIGSTOP freezes the VMM worker process and its TSI port forwarding).
 
@@ -83,7 +83,7 @@ The main router listens on `127.0.0.1:8099` (configurable via `RouterAddr`). It 
 
 When an HTTP request arrives on the main router, it resolves the target instance:
 
-1. **Header: `X-Aegis-Instance`** — route by instance ID or handle
+1. **Header: `X-OmniVM-Instance`** — route by instance ID or handle
 2. **Default fallback** — if exactly one instance exists, use it
 
 With multiple instances and no explicit routing, the router returns 503. Use per-port endpoints (from `--expose`) to reach specific instances directly — each instance gets its own port.

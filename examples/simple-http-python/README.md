@@ -1,21 +1,21 @@
 # simple-http-python
 
-Demonstrates a long-running HTTP server AegisVM agent written in Python using only the standard library.
+Demonstrates a long-running HTTP server OmniVM agent written in Python using only the standard library.
 
 ## What this example shows
 
-- **Long-lived instance**: the server runs indefinitely, handling requests via the AegisVM router.
+- **Long-lived instance**: the server runs indefinitely, handling requests via the OmniVM router.
 - **Secrets injection**: reads `API_KEY` from environment variables.
 - **Workspace listing**: displays files present in `/workspace` on the response page.
 - **Structured logging**: writes JSON log lines to stdout for each request.
-- **Router access**: the AegisVM router forwards external HTTP traffic to port 80 inside the VM.
+- **Router access**: the OmniVM router forwards external HTTP traffic to port 80 inside the VM.
 
 ## Running
 
 ```bash
-aegis up
-aegis secret set API_KEY sk-test123
-aegis run --name http-demo --expose 80 --image python:3.12-alpine -- python server.py
+ovm up
+ovm secret set API_KEY sk-test123
+ovm run --name http-demo --expose 80 --image python:3.12-alpine -- python server.py
 ```
 
 In another terminal:

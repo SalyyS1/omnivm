@@ -27,21 +27,21 @@ func TestMain(m *testing.M) {
 	root := repoRoot()
 	binDir = filepath.Join(root, "bin")
 
-	if _, err := os.Stat(filepath.Join(binDir, "aegis")); err != nil {
+	if _, err := os.Stat(filepath.Join(binDir, "ovm")); err != nil {
 		fmt.Fprintf(os.Stderr, "binaries not found at %s — run 'make all' first\n", binDir)
 		os.Exit(1)
 	}
 
 	// Ensure daemon is stopped before we start
-	aegis("down")
+	ovm("down")
 	time.Sleep(500 * time.Millisecond)
 
 	// Start daemon
-	cmd := exec.Command(filepath.Join(binDir, "aegisd"))
+	cmd := exec.Command(filepath.Join(binDir, "ovmd"))
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "start aegisd: %v\n", err)
+		fmt.Fprintf(os.Stderr, "start ovmd: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	if !ready {
-		fmt.Fprintln(os.Stderr, "aegisd did not start within timeout")
+		fmt.Fprintln(os.Stderr, "ovmd did not start within timeout")
 		cmd.Process.Kill()
 		os.Exit(1)
 	}
@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	// Tear down
-	aegis("down")
+	ovm("down")
 	time.Sleep(500 * time.Millisecond)
 
 	os.Exit(code)
@@ -85,10 +85,10 @@ func repoRoot() string {
 	}
 }
 
-func aegis(args ...string) (string, error) {
+func ovm(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(binDir, "aegis"), args...)
+	cmd := exec.CommandContext(ctx, filepath.Join(binDir, "ovm"), args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -97,18 +97,18 @@ func aegis(args ...string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-func aegisRun(t *testing.T, args ...string) string {
+func ovmRun(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := aegis(args...)
+	out, err := ovm(args...)
 	if err != nil {
-		t.Fatalf("aegis %v failed: %v\noutput: %s", args, err, out)
+		t.Fatalf("ovm %v failed: %v\noutput: %s", args, err, out)
 	}
 	return out
 }
 
 func daemonRunning() bool {
 	home, _ := os.UserHomeDir()
-	data, err := os.ReadFile(filepath.Join(home, ".aegis", "data", "aegisd.pid"))
+	data, err := os.ReadFile(filepath.Join(home, ".omnivm", "data", "ovmd.pid"))
 	if err != nil {
 		return false
 	}
@@ -125,7 +125,7 @@ func daemonRunning() bool {
 
 func daemonClient() *http.Client {
 	home, _ := os.UserHomeDir()
-	sockPath := filepath.Join(home, ".aegis", "aegisd.sock")
+	sockPath := filepath.Join(home, ".omnivm", "ovmd.sock")
 	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -140,7 +140,7 @@ func apiPost(t *testing.T, path string, body interface{}) map[string]interface{}
 	t.Helper()
 	bodyJSON, _ := json.Marshal(body)
 	client := daemonClient()
-	resp, err := client.Post("http://aegis"+path, "application/json", bytes.NewReader(bodyJSON))
+	resp, err := client.Post("http://ovm"+path, "application/json", bytes.NewReader(bodyJSON))
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
@@ -157,7 +157,7 @@ func apiPost(t *testing.T, path string, body interface{}) map[string]interface{}
 func apiDelete(t *testing.T, path string) {
 	t.Helper()
 	client := daemonClient()
-	req, _ := http.NewRequest("DELETE", "http://aegis"+path, nil)
+	req, _ := http.NewRequest("DELETE", "http://ovm"+path, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE %s: %v", path, err)
@@ -169,7 +169,7 @@ func apiPut(t *testing.T, path string, body interface{}) map[string]interface{} 
 	t.Helper()
 	bodyJSON, _ := json.Marshal(body)
 	client := daemonClient()
-	req, _ := http.NewRequest("PUT", "http://aegis"+path, bytes.NewReader(bodyJSON))
+	req, _ := http.NewRequest("PUT", "http://ovm"+path, bytes.NewReader(bodyJSON))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -188,7 +188,7 @@ func apiPut(t *testing.T, path string, body interface{}) map[string]interface{} 
 func apiDeleteAllowFail(t *testing.T, path string) {
 	t.Helper()
 	client := daemonClient()
-	req, _ := http.NewRequest("DELETE", "http://aegis"+path, nil)
+	req, _ := http.NewRequest("DELETE", "http://ovm"+path, nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		return
@@ -199,7 +199,7 @@ func apiDeleteAllowFail(t *testing.T, path string) {
 func apiGet(t *testing.T, path string) map[string]interface{} {
 	t.Helper()
 	client := daemonClient()
-	resp, err := client.Get("http://aegis" + path)
+	resp, err := client.Get("http://ovm" + path)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}

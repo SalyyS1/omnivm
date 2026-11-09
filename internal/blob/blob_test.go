@@ -50,7 +50,7 @@ func TestContentAddressedDedup(t *testing.T) {
 	}
 
 	// Verify only one file exists
-	blobDir := filepath.Join(dir, ".aegis", "blobs")
+	blobDir := filepath.Join(dir, ".omnivm", "blobs")
 	entries, _ := os.ReadDir(blobDir)
 	count := 0
 	for _, e := range entries {

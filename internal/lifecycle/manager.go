@@ -25,14 +25,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/config"
-	"github.com/xfeldman/aegisvm/internal/image"
-	"github.com/xfeldman/aegisvm/internal/logstore"
-	"github.com/xfeldman/aegisvm/internal/overlay"
-	"github.com/xfeldman/aegisvm/internal/registry"
-	"github.com/xfeldman/aegisvm/internal/secrets"
-	"github.com/xfeldman/aegisvm/internal/tether"
-	"github.com/xfeldman/aegisvm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/image"
+	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/overlay"
+	"github.com/SalyyS1/omnivm/internal/registry"
+	"github.com/SalyyS1/omnivm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
 // ErrInstanceStopped is returned when exec is attempted on a stopped instance.
@@ -677,7 +677,7 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		}
 	})
 
-	// Register guest request handler (for guest API → aegisd calls)
+	// Register guest request handler (for guest API → ovmd calls)
 	demux.onGuestRequest = func(method string, params json.RawMessage) (interface{}, error) {
 		return m.handleGuestRequest(inst, method, params)
 	}
@@ -1140,7 +1140,7 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 
 	progress := func(stage, detail string) {
 		m.logStore.GetOrCreate(inst.ID).Append("stderr",
-			fmt.Sprintf("[aegis] image %s: %s", stage, detail), "", logstore.SourceSystem)
+			fmt.Sprintf("[ovm] image %s: %s", stage, detail), "", logstore.SourceSystem)
 	}
 	cachedDir, _, err := m.imageCache.GetOrPull(ctx, inst.ImageRef, progress)
 	if err != nil {
@@ -1189,7 +1189,7 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 // (e.g. OCI image overlay directory on Linux).
 func dirToExt4(dir string, sizeMB int) (string, error) {
 	out := dir + ".ext4"
-	cmd := exec.Command("mkfs.ext4", "-d", dir, "-L", "aegis", out, fmt.Sprintf("%dM", sizeMB))
+	cmd := exec.Command("mkfs.ext4", "-d", dir, "-L", "ovm", out, fmt.Sprintf("%dM", sizeMB))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -1,5 +1,5 @@
 // Package blob provides content-addressed blob storage for tether image support.
-// v1 implementation: workspace filesystem ({root}/.aegis/blobs/{sha256}.{ext}).
+// v1 implementation: workspace filesystem ({root}/.omnivm/blobs/{sha256}.{ext}).
 package blob
 
 import (
@@ -30,7 +30,7 @@ type BlobStore interface {
 	Get(key string) ([]byte, error)
 }
 
-// WorkspaceBlobStore stores blobs in {root}/.aegis/blobs/{sha256}.{ext}.
+// WorkspaceBlobStore stores blobs in {root}/.omnivm/blobs/{sha256}.{ext}.
 type WorkspaceBlobStore struct {
 	root string
 }
@@ -53,7 +53,7 @@ func (s *WorkspaceBlobStore) Put(data []byte, mediaType string) (string, error) 
 
 	hash := sha256.Sum256(data)
 	key := hex.EncodeToString(hash[:]) + ext
-	dir := filepath.Join(s.root, ".aegis", "blobs")
+	dir := filepath.Join(s.root, ".omnivm", "blobs")
 	final := filepath.Join(dir, key)
 
 	// Content-addressed dedup: skip if exists
@@ -88,7 +88,7 @@ func (s *WorkspaceBlobStore) Get(key string) ([]byte, error) {
 	if !validBlobKey.MatchString(key) {
 		return nil, fmt.Errorf("invalid blob key: %q", key)
 	}
-	path := filepath.Join(s.root, ".aegis", "blobs", key)
+	path := filepath.Join(s.root, ".omnivm", "blobs", key)
 	return os.ReadFile(path)
 }
 

@@ -1,6 +1,6 @@
 # Quickstart
 
-Get from zero to a running agent inside an AegisVM microVM in under 5 minutes.
+Get from zero to a running agent inside an OmniVM microVM in under 5 minutes.
 
 ---
 
@@ -31,11 +31,11 @@ ls /dev/kvm     # must exist
 #### Homebrew (recommended)
 
 ```bash
-brew tap xfeldman/aegisvm
-brew install aegisvm
+brew tap SalyyS1/omnivm
+brew install omnivm
 ```
 
-This installs all binaries and handles hypervisor entitlement signing automatically. On first run, `aegis up` will download the default rootfs (Alpine + Python 3.12).
+This installs all binaries and handles hypervisor entitlement signing automatically. On first run, `ovm up` will download the default rootfs (Alpine + Python 3.12).
 
 #### From source
 
@@ -49,22 +49,22 @@ brew install libkrun e2fsprogs
 Clone and build:
 
 ```bash
-git clone https://github.com/xfeldman/aegisvm.git
-cd aegisvm
+git clone https://github.com/SalyyS1/omnivm.git
+cd omnivm
 make all
 ```
 
-`make all` builds into `./bin/`: `aegisd`, `aegis`, `aegis-harness`, `aegis-mcp`, `aegis-vmm-worker`.
+`make all` builds into `./bin/`: `ovmd`, `ovm`, `ovm-harness`, `ovm-mcp`, `ovm-vmm-worker`.
 
 ### Linux
 
 #### One-liner (recommended)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/xfeldman/aegisvm/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/SalyyS1/omnivm/main/install.sh | sh
 ```
 
-Installs both `aegisvm` and `aegisvm-agent-kit` packages, plus dependencies (`virtiofsd`, `e2fsprogs`, `iptables`, `iproute2`). Binaries go to `/usr/bin/` and `/usr/lib/aegisvm/`, kernel to `/usr/share/aegisvm/kernel/`.
+Installs both `omnivm` and `omnivm-agent-kit` packages, plus dependencies (`virtiofsd`, `e2fsprogs`, `iptables`, `iproute2`). Binaries go to `/usr/bin/` and `/usr/lib/omnivm/`, kernel to `/usr/share/omnivm/kernel/`.
 
 #### From source
 
@@ -77,20 +77,20 @@ sudo apt install virtiofsd e2fsprogs
 Clone and build:
 
 ```bash
-git clone https://github.com/xfeldman/aegisvm.git
-cd aegisvm
+git clone https://github.com/SalyyS1/omnivm.git
+cd omnivm
 make cloud-hypervisor    # download Cloud Hypervisor static binary
 make kernel              # download prebuilt microVM kernel (~30MB)
-make all                 # build aegisd, aegis, aegis-harness, aegis-mcp
+make all                 # build ovmd, ovm, ovm-harness, ovm-mcp
 ```
 
-`make all` builds into `./bin/`: `aegisd`, `aegis`, `aegis-harness`, `aegis-mcp` (no vmm-worker on Linux).
+`make all` builds into `./bin/`: `ovmd`, `ovm`, `ovm-harness`, `ovm-mcp` (no vmm-worker on Linux).
 
 > **Unsupported architecture?** If `make kernel` fails (e.g. RISC-V), use `make kernel-build` to compile from source. Requires `build-essential flex bison libelf-dev libssl-dev bc`.
 
 ## 3. Base Rootfs
 
-AegisVM needs a base root filesystem to boot VMs. Three pre-built variants are available:
+OmniVM needs a base root filesystem to boot VMs. Three pre-built variants are available:
 
 | Variant | Contents | Size |
 |---------|----------|------|
@@ -98,21 +98,21 @@ AegisVM needs a base root filesystem to boot VMs. Three pre-built variants are a
 | `python` | Alpine + Python 3.12 | ~55MB |
 | `full` | Alpine + Python 3.12 + Node.js + npm + git + curl + jq | ~90MB |
 
-**Default:** `python` is auto-downloaded on first `aegis up` if no rootfs is installed.
+**Default:** `python` is auto-downloaded on first `ovm up` if no rootfs is installed.
 
 Manage rootfs variants:
 
 ```bash
 # See what's available and installed
-aegis rootfs list
+ovm rootfs list
 
 # Download a specific variant (replaces current base-rootfs)
-aegis rootfs pull python
-aegis rootfs pull alpine
-aegis rootfs pull full
+ovm rootfs pull python
+ovm rootfs pull alpine
+ovm rootfs pull full
 ```
 
-The active rootfs lives at `~/.aegis/base-rootfs` (macOS, directory) or `~/.aegis/base-rootfs.ext4` (Linux, ext4 image). Pulling a variant replaces it. This is the rootfs used when you run instances without `--image`.
+The active rootfs lives at `~/.omnivm/base-rootfs` (macOS, directory) or `~/.omnivm/base-rootfs.ext4` (Linux, ext4 image). Pulling a variant replaces it. This is the rootfs used when you run instances without `--image`.
 
 **Building rootfs from source (optional):**
 
@@ -122,64 +122,64 @@ make base-rootfs    # requires Docker
 # Linux: creates base/base-rootfs.ext4 image
 ```
 
-Copy the result to `~/.aegis/`:
+Copy the result to `~/.omnivm/`:
 
 ```bash
 # macOS
-cp -r base/rootfs ~/.aegis/base-rootfs
+cp -r base/rootfs ~/.omnivm/base-rootfs
 
 # Linux
-cp base/base-rootfs.ext4 ~/.aegis/base-rootfs.ext4
+cp base/base-rootfs.ext4 ~/.omnivm/base-rootfs.ext4
 ```
 
-## 4. Start AegisVM
+## 4. Start OmniVM
 
 ```bash
-aegis up
+ovm up
 ```
 
 On Linux, you'll be prompted for your password (sudo is needed for tap networking). Subsequent runs use cached credentials.
 
-This launches `aegisd` in the background. If no rootfs is installed, it downloads the default (`python`) first. Verify it is running:
+This launches `ovmd` in the background. If no rootfs is installed, it downloads the default (`python`) first. Verify it is running:
 
 ```bash
-aegis status
-aegis doctor    # detailed platform + dependency check
+ovm status
+ovm doctor    # detailed platform + dependency check
 ```
 
 ## 5. Run Your First Command
 
 ```bash
-aegis run -- echo "hello from aegisvm"
+ovm run -- echo "hello from omnivm"
 ```
 
 Expected output:
 
 ```
-hello from aegisvm
+hello from omnivm
 ```
 
 What happened behind the scenes:
 
-1. The CLI sent a request to `aegisd` over `~/.aegis/aegisd.sock`.
-2. `aegisd` booted a microVM (libkrun on macOS, Cloud Hypervisor on Linux).
-3. Inside the VM, `aegis-harness` (PID 1) received the `run` RPC over vsock.
-4. The harness executed `echo "hello from aegisvm"` and streamed stdout back.
+1. The CLI sent a request to `ovmd` over `~/.omnivm/ovmd.sock`.
+2. `ovmd` booted a microVM (libkrun on macOS, Cloud Hypervisor on Linux).
+3. Inside the VM, `ovm-harness` (PID 1) received the `run` RPC over vsock.
+4. The harness executed `echo "hello from omnivm"` and streamed stdout back.
 5. When the process exited, the harness sent a `processExited` notification.
 6. The CLI received the exit, deleted the instance, and exited with code 0.
 
 ## 6. Run with a Custom Image
 
 ```bash
-aegis run --image alpine:3.21 -- echo hello
+ovm run --image alpine:3.21 -- echo hello
 ```
 
-When you specify `--image`, aegisd pulls the OCI image (if not already cached), extracts it into a rootfs, and boots the VM from that rootfs. Subsequent runs with the same image skip the pull and use the cached copy from `~/.aegis/data/images/`.
+When you specify `--image`, ovmd pulls the OCI image (if not already cached), extracts it into a rootfs, and boots the VM from that rootfs. Subsequent runs with the same image skip the pull and use the cached copy from `~/.omnivm/data/images/`.
 
 ## 7. Start an HTTP Server
 
 ```bash
-aegis run --expose 8080:80 -- python3 -m http.server 80
+ovm run --expose 8080:80 -- python3 -m http.server 80
 ```
 
 In a second terminal:
@@ -193,7 +193,7 @@ You should see the directory listing from Python's HTTP server.
 How this works:
 
 - `--expose 8080:80` maps public port 8080 to guest port 80. You can also use `--expose 80` to let the OS assign a random public port.
-- All exposed ports are owned by the router in aegisd -- traffic is proxied with wake-on-connect.
+- All exposed ports are owned by the router in ovmd -- traffic is proxied with wake-on-connect.
 - When idle for 60 seconds, the VM is paused. After 5 minutes idle, the VM is stopped entirely.
 - The next incoming connection wakes the VM automatically (scale-to-zero).
 
@@ -204,7 +204,7 @@ Press Ctrl+C in the first terminal to stop.
 Use `--workspace` to mount a host directory into the VM at `/workspace/`:
 
 ```bash
-aegis run --workspace ./myapp --expose 8080:80 -- python3 /workspace/server.py
+ovm run --workspace ./myapp --expose 8080:80 -- python3 /workspace/server.py
 ```
 
 This mounts `./myapp` from your host as `/workspace/` inside the VM via virtiofs. Files are available read-write and persist after the VM stops.
@@ -215,10 +215,10 @@ Start a long-lived instance with a handle:
 
 ```bash
 # Start the instance (public port 8080 -> guest port 80)
-aegis instance start --name demo --expose 8080:80 -- python3 -m http.server 80
+ovm instance start --name demo --expose 8080:80 -- python3 -m http.server 80
 
 # Set a workspace secret (available as env var inside VMs)
-aegis secret set API_KEY sk-test123
+ovm secret set API_KEY sk-test123
 
 # Curl the server
 curl http://127.0.0.1:8080/
@@ -229,7 +229,7 @@ curl http://127.0.0.1:8080/
 While the instance is running, exec commands inside the VM:
 
 ```bash
-aegis exec demo -- echo "hello from inside"
+ovm exec demo -- echo "hello from inside"
 ```
 
 Expected output:
@@ -246,11 +246,11 @@ is auto-resumed if paused.
 View logs from a running instance:
 
 ```bash
-aegis logs demo --follow
+ovm logs demo --follow
 ```
 
 Logs are captured from the moment the VM starts and persisted to
-`~/.aegis/data/logs/`. Without `--follow`, all buffered logs are printed and the
+`~/.omnivm/data/logs/`. Without `--follow`, all buffered logs are printed and the
 command exits. With `--follow`, new log entries stream live until Ctrl+C.
 
 ## 12. Inspect Instances
@@ -258,60 +258,60 @@ command exits. With `--follow`, new log entries stream live until Ctrl+C.
 List all instances:
 
 ```bash
-aegis instance list
+ovm instance list
 ```
 
 Get detailed info about a specific instance:
 
 ```bash
-aegis instance info demo
+ovm instance info demo
 ```
 
 Disable the instance -- the instance becomes unmanaged. The VM is stopped, port
-listeners are closed, and aegisd will not auto-start it for any reason (no
+listeners are closed, and ovmd will not auto-start it for any reason (no
 wake-on-connect, no implicit boot). The instance stays in the list as a registry
 record with logs preserved:
 
 ```bash
-aegis instance disable demo
+ovm instance disable demo
 ```
 
-The only way to bring it back is an explicit `aegis instance start --name demo`.
+The only way to bring it back is an explicit `ovm instance start --name demo`.
 
 Delete the instance entirely (removes from list, cleans logs):
 
 ```bash
-aegis instance delete demo
+ovm instance delete demo
 ```
 
 ## 13. MCP (Claude Code Integration)
 
-Register AegisVM as an MCP server so Claude can drive sandboxed instances:
+Register OmniVM as an MCP server so Claude can drive sandboxed instances:
 
 ```bash
-aegis mcp install
+ovm mcp install
 ```
 
 Once registered, Claude can start VMs, exec commands, read logs, and manage secrets directly.
 
 ## 14. Where Is My Data?
 
-All AegisVM state lives under `~/.aegis/`:
+All OmniVM state lives under `~/.omnivm/`:
 
 | Path | Purpose |
 |---|---|
-| `~/.aegis/aegisd.sock` | Unix domain socket for CLI-to-daemon communication |
-| `~/.aegis/data/aegisd.pid` | PID file for the running daemon |
-| `~/.aegis/data/aegis.db` | SQLite database (instances, secrets) |
-| `~/.aegis/data/images/` | Cached OCI image layers |
-| `~/.aegis/data/overlays/` | Instance rootfs overlays |
-| `~/.aegis/data/workspaces/` | Workspace directories |
-| `~/.aegis/data/logs/` | Per-instance NDJSON log files |
-| `~/.aegis/data/snapshots/` | VM memory snapshots (Linux only) |
-| `~/.aegis/kernel/vmlinux` | MicroVM kernel (Linux only) |
-| `~/.aegis/master.key` | Encryption key for secrets at rest |
-| `~/.aegis/base-rootfs/` | Active base rootfs directory (macOS) |
-| `~/.aegis/base-rootfs.ext4` | Active base rootfs ext4 image (Linux) |
+| `~/.omnivm/ovmd.sock` | Unix domain socket for CLI-to-daemon communication |
+| `~/.omnivm/data/ovmd.pid` | PID file for the running daemon |
+| `~/.omnivm/data/ovm.db` | SQLite database (instances, secrets) |
+| `~/.omnivm/data/images/` | Cached OCI image layers |
+| `~/.omnivm/data/overlays/` | Instance rootfs overlays |
+| `~/.omnivm/data/workspaces/` | Workspace directories |
+| `~/.omnivm/data/logs/` | Per-instance NDJSON log files |
+| `~/.omnivm/data/snapshots/` | VM memory snapshots (Linux only) |
+| `~/.omnivm/kernel/vmlinux` | MicroVM kernel (Linux only) |
+| `~/.omnivm/master.key` | Encryption key for secrets at rest |
+| `~/.omnivm/base-rootfs/` | Active base rootfs directory (macOS) |
+| `~/.omnivm/base-rootfs.ext4` | Active base rootfs ext4 image (Linux) |
 
 ## 15. Platform Differences
 
@@ -326,26 +326,26 @@ All AegisVM state lives under `~/.aegis/`:
 | Cold restart | SIGCONT (instant) | Restore from snapshot |
 | Workspace | virtiofs (built-in) | virtiofsd sidecar |
 
-From the user's perspective, the CLI commands are identical. The backend differences are handled transparently by aegisd.
+From the user's perspective, the CLI commands are identical. The backend differences are handled transparently by ovmd.
 
 ## 16. Clean Up
 
 ```bash
-aegis down
+ovm down
 ```
 
-This shuts down `aegisd` and all running VMs.
+This shuts down `ovmd` and all running VMs.
 
 To remove everything and start fresh:
 
 ```bash
-aegis down
-rm -rf ~/.aegis
+ovm down
+rm -rf ~/.omnivm
 ```
 
 ## 17. Next Steps
 
-- [AGENT_CONVENTIONS.md](AGENT_CONVENTIONS.md) -- conventions for building agents that run on AegisVM
+- [AGENT_CONVENTIONS.md](AGENT_CONVENTIONS.md) -- conventions for building agents that run on OmniVM
 - [CLI.md](CLI.md) -- full CLI reference
 - [cloud-hypervisor-backend.md](../specs/cloud-hypervisor-backend.md) -- Linux backend architecture (for contributors)
 - `examples/` -- sample agents

@@ -1,11 +1,11 @@
 // Package harness implements the guest-side agent harness that runs as PID 1
-// inside Aegis microVMs.
+// inside OmniVM microVMs.
 //
 // The harness connects outbound to the host's control channel. Two modes:
-//   - gvproxy (AEGIS_VSOCK_PORT set): connect via AF_VSOCK to host unix socket
-//   - TSI legacy (AEGIS_HOST_ADDR set): connect via TCP, TSI intercepts AF_INET
+//   - gvproxy (OVM_VSOCK_PORT set): connect via AF_VSOCK to host unix socket
+//   - TSI legacy (OVM_HOST_ADDR set): connect via TCP, TSI intercepts AF_INET
 //
-// Build: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o aegis-harness ./internal/harness
+// Build: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ovm-harness ./internal/harness
 package harness
 
 import (
@@ -21,7 +21,7 @@ import (
 // Run starts the harness. This is the main entry point called by the harness binary.
 func Run() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("aegis-harness starting")
+	log.Println("ovm-harness starting")
 
 	// Mount /proc, /sys, /tmp, configure network, mount workspace
 	mountEssential()
@@ -61,10 +61,10 @@ func Run() {
 }
 
 // connectToHost establishes the control channel to the host.
-// Prefers vsock (AEGIS_VSOCK_PORT) over TCP/TSI (AEGIS_HOST_ADDR).
+// Prefers vsock (OVM_VSOCK_PORT) over TCP/TSI (OVM_HOST_ADDR).
 func connectToHost() net.Conn {
-	vsockPort := os.Getenv("AEGIS_VSOCK_PORT")
-	vsockCID := os.Getenv("AEGIS_VSOCK_CID")
+	vsockPort := os.Getenv("OVM_VSOCK_PORT")
+	vsockCID := os.Getenv("OVM_VSOCK_CID")
 
 	if vsockPort != "" {
 		log.Printf("connecting to host via vsock (port=%s, cid=%s)", vsockPort, vsockCID)
@@ -84,9 +84,9 @@ func connectToHost() net.Conn {
 	}
 
 	// Legacy TSI path
-	hostAddr := os.Getenv("AEGIS_HOST_ADDR")
+	hostAddr := os.Getenv("OVM_HOST_ADDR")
 	if hostAddr == "" {
-		log.Fatal("neither AEGIS_VSOCK_PORT nor AEGIS_HOST_ADDR set — cannot connect to host")
+		log.Fatal("neither OVM_VSOCK_PORT nor OVM_HOST_ADDR set — cannot connect to host")
 	}
 
 	log.Printf("connecting to host at %s (TSI mode)", hostAddr)

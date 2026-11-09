@@ -72,7 +72,7 @@ func Pull(ctx context.Context, imageRef string, arch string) (*PullResult, error
 			return nil, fmt.Errorf("get image config: %w", err)
 		}
 		if cfg.OS != "linux" || cfg.Architecture != arch {
-			return nil, fmt.Errorf("image %s is %s/%s, aegis requires linux/%s", imageRef, cfg.OS, cfg.Architecture, arch)
+			return nil, fmt.Errorf("image %s is %s/%s, ovm requires linux/%s", imageRef, cfg.OS, cfg.Architecture, arch)
 		}
 	}
 

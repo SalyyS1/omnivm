@@ -142,40 +142,40 @@ func TestRuntimeExpose(t *testing.T) {
 	t.Log("PASS: all 6 steps passed")
 }
 
-// TestRuntimeExpose_CLI tests the `aegis instance expose` and `unexpose` CLI commands.
+// TestRuntimeExpose_CLI tests the `ovm instance expose` and `unexpose` CLI commands.
 func TestRuntimeExpose_CLI(t *testing.T) {
 	const handle = "expose-cli-test"
 
 	// Cleanup
-	aegis("instance", "delete", handle)
+	ovm("instance", "delete", handle)
 	time.Sleep(500 * time.Millisecond)
 
 	// Start without expose
-	out := aegisRun(t, "instance", "start", "--name", handle, "--", "python3", "-m", "http.server", "80")
+	out := ovmRun(t, "instance", "start", "--name", handle, "--", "python3", "-m", "http.server", "80")
 	t.Logf("start: %s", out)
 	t.Cleanup(func() {
-		aegis("instance", "delete", handle)
+		ovm("instance", "delete", handle)
 	})
 
 	// Wait for running
 	waitForState(t, handle, "running", 30*time.Second)
 
 	// Expose via CLI
-	out = aegisRun(t, "instance", "expose", handle, "80")
+	out = ovmRun(t, "instance", "expose", handle, "80")
 	t.Logf("expose: %s", out)
 	if out == "" {
 		t.Fatal("expected output from expose command")
 	}
 
 	// Verify info shows endpoint
-	out = aegisRun(t, "instance", "info", handle)
+	out = ovmRun(t, "instance", "info", handle)
 	if out == "" {
 		t.Fatal("empty info output")
 	}
 	t.Logf("info:\n%s", out)
 
 	// Unexpose via CLI
-	out = aegisRun(t, "instance", "unexpose", handle, "80")
+	out = ovmRun(t, "instance", "unexpose", handle, "80")
 	t.Logf("unexpose: %s", out)
 }
 
@@ -185,7 +185,7 @@ func apiDeleteExposePort(t *testing.T, instID string, guestPort int) {
 	t.Helper()
 	client := daemonClient()
 	req, _ := http.NewRequest("DELETE",
-		fmt.Sprintf("http://aegis/v1/instances/%s/expose/%d", instID, guestPort), nil)
+		fmt.Sprintf("http://ovm/v1/instances/%s/expose/%d", instID, guestPort), nil)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("DELETE expose: %v", err)

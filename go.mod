@@ -1,4 +1,4 @@
-module github.com/xfeldman/aegisvm
+module github.com/SalyyS1/omnivm
 
 go 1.25.0
 

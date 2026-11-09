@@ -1,4 +1,4 @@
-"""Workspace path helpers for Aegis agents."""
+"""Workspace path helpers for OmniVM agents."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ def workspace_path() -> str:
     """Return the workspace root.
 
     Resolution order:
-    1. AEGIS_WORKSPACE_PATH environment variable (explicit override).
-    2. /workspace -- the conventional mount point inside an Aegis microVM.
+    1. OVM_WORKSPACE_PATH environment variable (explicit override).
+    2. /workspace -- the conventional mount point inside an OmniVM microVM.
     3. ./workspace -- fallback for local development outside a VM.
     """
-    env = os.environ.get("AEGIS_WORKSPACE_PATH")
+    env = os.environ.get("OVM_WORKSPACE_PATH")
     if env:
         return env
     if os.path.isdir("/workspace"):

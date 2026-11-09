@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xfeldman/aegisvm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
 // handleGuestRequest processes RPC requests from the harness's guest API server.
