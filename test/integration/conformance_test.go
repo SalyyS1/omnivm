@@ -249,7 +249,7 @@ func TestConformance_ProcessExited(t *testing.T) {
 	}
 }
 
-// TestConformance_ExecStopped409 — exec on stopped instance returns 409.
+// TestConformance_ExecStopped409 — exec on a disabled instance returns 409.
 func TestConformance_ExecStopped409(t *testing.T) {
 	inst := apiPost(t, "/v1/instances", map[string]interface{}{
 		"command": []string{"echo", "quick"},
@@ -258,8 +258,10 @@ func TestConformance_ExecStopped409(t *testing.T) {
 	id := inst["id"].(string)
 	t.Cleanup(func() { apiDeleteAllowFail(t, "/v1/instances/"+id) })
 
-	// Wait for process to exit → stopped
+	// Wait for process to exit → stopped, then disable it. A stopped but
+	// enabled instance is woken by exec; only a disabled one refuses it.
 	waitForState(t, id, "stopped", 30*time.Second)
+	apiPost(t, fmt.Sprintf("/v1/instances/%s/disable", id), nil)
 
 	// Exec should fail with 409
 	client := daemonClient()
@@ -275,7 +277,7 @@ func TestConformance_ExecStopped409(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 409 {
-		t.Fatalf("expected 409 for exec on stopped instance, got %d", resp.StatusCode)
+		t.Fatalf("expected 409 for exec on disabled instance, got %d", resp.StatusCode)
 	}
 }
 

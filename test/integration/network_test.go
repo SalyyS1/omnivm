@@ -378,7 +378,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-http.server.HTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
+# Threaded server with a deep accept queue: the test exercises OmniVM's
+# ingress path, not the backlog of a single-threaded demo server.
+class Server(http.server.ThreadingHTTPServer):
+    request_queue_size = 128
+
+Server(('0.0.0.0', 8080), Handler).serve_forever()
 `
 
 	inst := apiPost(t, "/v1/instances", map[string]interface{}{

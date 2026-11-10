@@ -93,28 +93,30 @@ func TestRouterAlwaysProxy(t *testing.T) {
 		t.Fatalf("expected state=running after resume, got %s", info["state"])
 	}
 
-	// --- Step 4: Stop and test wake-on-connect (cold boot) ---
-	t.Log("Step 4: stop instance, then curl (cold boot wake-on-connect)")
-	apiPost(t, fmt.Sprintf("/v1/instances/%s/stop", instID), nil)
-	time.Sleep(1 * time.Second)
+	// --- Step 4: Disable (no wake-on-connect), then start again ---
+	t.Log("Step 4: disable instance, verify no wake-on-connect, then start (cold boot)")
+	apiPost(t, fmt.Sprintf("/v1/instances/%s/disable", instID), nil)
+	waitForState(t, instID, "stopped", 30*time.Second)
 
-	// Verify stopped
+	if _, err := waitForHTTP(url, 3*time.Second); err == nil {
+		t.Fatal("disabled instance answered HTTP; disable must turn off wake-on-connect")
+	}
 	info = apiGet(t, fmt.Sprintf("/v1/instances/%s", instID))
 	if info["state"] != "stopped" {
-		t.Fatalf("expected state=stopped, got %s", info["state"])
+		t.Fatalf("disabled instance was woken up: state=%s", info["state"])
 	}
 
-	// Curl the public port — should boot and respond
 	start = time.Now()
-	body, err = waitForHTTP(url, 30*time.Second)
+	apiPost(t, fmt.Sprintf("/v1/instances/%s/start", instID), nil)
+	body, err = waitForHTTP(url, 60*time.Second)
 	bootLatency := time.Since(start)
 	if err != nil {
-		t.Fatalf("HTTP failed after stop: %v", err)
+		t.Fatalf("HTTP failed after start: %v", err)
 	}
 	if body == "" {
 		t.Fatal("empty HTTP response after boot")
 	}
-	t.Logf("  wake-on-connect from STOPPED: HTTP 200 in %s", bootLatency)
+	t.Logf("  cold boot after start: HTTP 200 in %s", bootLatency)
 
 	// Verify running again
 	info = apiGet(t, fmt.Sprintf("/v1/instances/%s", instID))

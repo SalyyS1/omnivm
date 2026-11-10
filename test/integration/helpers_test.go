@@ -214,10 +214,24 @@ func apiGet(t *testing.T, path string) map[string]interface{} {
 }
 
 func waitForHTTP(url string, timeout time.Duration) (string, error) {
+	return waitForHTTPInstance(url, "", timeout)
+}
+
+// waitForHTTPInstance polls url until it returns 200. When instanceID is set,
+// the request carries the X-OmniVM-Instance header so the shared router port
+// targets that instance even while other instances exist.
+func waitForHTTPInstance(url, instanceID string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 5 * time.Second}
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return "", err
+		}
+		if instanceID != "" {
+			req.Header.Set("X-OmniVM-Instance", instanceID)
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			defer resp.Body.Close()
 			body, _ := io.ReadAll(resp.Body)

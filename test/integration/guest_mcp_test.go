@@ -32,7 +32,7 @@ func TestGuestMCP_Initialize(t *testing.T) {
 	}
 }
 
-// TestGuestMCP_ToolsList tests that tools/list returns all 6 tools.
+// TestGuestMCP_ToolsList tests that tools/list returns every guest MCP tool.
 func TestGuestMCP_ToolsList(t *testing.T) {
 	resp := apiPost(t, "/v1/instances", map[string]interface{}{
 		"handle":  "mcp-tools-test",
@@ -58,7 +58,7 @@ func TestGuestMCP_ToolsList(t *testing.T) {
 		t.Fatalf("failed to parse tools/list response: %v\noutput: %s", err, out)
 	}
 
-	expectedTools := []string{"instance_spawn", "instance_list", "instance_stop", "self_info", "keepalive_acquire", "keepalive_release"}
+	expectedTools := []string{"instance_spawn", "instance_list", "instance_stop", "expose_port", "unexpose_port", "keepalive_acquire", "keepalive_release"}
 	if len(mcpResp.Result.Tools) != len(expectedTools) {
 		t.Fatalf("expected %d tools, got %d: %s", len(expectedTools), len(mcpResp.Result.Tools), out)
 	}
@@ -71,28 +71,6 @@ func TestGuestMCP_ToolsList(t *testing.T) {
 		if !toolNames[expected] {
 			t.Errorf("missing tool: %s", expected)
 		}
-	}
-}
-
-// TestGuestMCP_SelfInfo tests calling self_info via MCP tools/call.
-func TestGuestMCP_SelfInfo(t *testing.T) {
-	resp := apiPost(t, "/v1/instances", map[string]interface{}{
-		"handle":  "mcp-self-test",
-		"command": []string{"sleep", "120"},
-	})
-	id := resp["id"].(string)
-	defer apiDelete(t, "/v1/instances/"+id)
-
-	waitForState(t, id, "running", 30*time.Second)
-
-	out := ovmExec(t, id, "sh", "-c",
-		`printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"self_info","arguments":{}}}\n' | ovm-mcp-guest | tail -1`)
-
-	if !strings.Contains(out, id) {
-		t.Fatalf("self_info should return instance ID %s, got: %s", id, out)
-	}
-	if !strings.Contains(out, "mcp-self-test") {
-		t.Fatalf("self_info should return handle, got: %s", out)
 	}
 }
 

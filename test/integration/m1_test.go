@@ -22,7 +22,7 @@ func TestServeBasicHTTP(t *testing.T) {
 	// Expose port at runtime
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/expose", id), map[string]interface{}{"port": 80})
 
-	body, err := waitForHTTP("http://127.0.0.1:8099/", 60*time.Second)
+	body, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 60*time.Second)
 	if err != nil {
 		t.Fatalf("serve mode HTTP failed: %v", err)
 	}
@@ -42,13 +42,13 @@ func TestServeMultipleCurls(t *testing.T) {
 
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/expose", id), map[string]interface{}{"port": 80})
 
-	_, err := waitForHTTP("http://127.0.0.1:8099/", 60*time.Second)
+	_, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 60*time.Second)
 	if err != nil {
 		t.Fatalf("initial request failed: %v", err)
 	}
 
 	for i := 0; i < 5; i++ {
-		body, err := waitForHTTP("http://127.0.0.1:8099/", 10*time.Second)
+		body, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 10*time.Second)
 		if err != nil {
 			t.Fatalf("request %d failed: %v", i+1, err)
 		}
@@ -72,7 +72,7 @@ func TestServePauseResume(t *testing.T) {
 
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/expose", id), map[string]interface{}{"port": 80})
 
-	_, err := waitForHTTP("http://127.0.0.1:8099/", 60*time.Second)
+	_, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 60*time.Second)
 	if err != nil {
 		t.Fatalf("initial request failed: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestServePauseResume(t *testing.T) {
 	time.Sleep(70 * time.Second)
 
 	t.Log("sending wake request...")
-	body, err := waitForHTTP("http://127.0.0.1:8099/", 30*time.Second)
+	body, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 30*time.Second)
 	if err != nil {
 		t.Fatalf("request after pause failed: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestServeCleanShutdown(t *testing.T) {
 
 	apiPost(t, fmt.Sprintf("/v1/instances/%s/expose", id), map[string]interface{}{"port": 80})
 
-	_, err := waitForHTTP("http://127.0.0.1:8099/", 60*time.Second)
+	_, err := waitForHTTPInstance("http://127.0.0.1:8099/", id, 60*time.Second)
 	if err != nil {
 		t.Fatalf("serve failed: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestServeCleanShutdown(t *testing.T) {
 	apiDelete(t, "/v1/instances/"+id)
 
 	time.Sleep(1 * time.Second)
-	_, err = waitForHTTP("http://127.0.0.1:8099/", 3*time.Second)
+	_, err = waitForHTTPInstance("http://127.0.0.1:8099/", id, 3*time.Second)
 	if err == nil {
 		t.Fatal("expected router to fail after instance deleted, but it succeeded")
 	}
