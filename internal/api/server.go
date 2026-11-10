@@ -750,16 +750,21 @@ func (s *Server) ensurePortListeners(inst *lifecycle.Instance) {
 	}
 	var savedPorts map[int]int
 	if s.registry != nil {
-		if ri, err := s.registry.GetInstance(inst.ID); err == nil && ri != nil {
+		ri, err := s.registry.GetInstance(inst.ID)
+		switch {
+		case err != nil:
+			log.Printf("instance %s: read saved public ports: %v", inst.ID, err)
+		case ri != nil:
 			savedPorts = ri.PublicPorts
 		}
 	}
 	for _, ep := range inst.ExposePorts {
-		requestedPort := 0
-		if savedPorts != nil {
-			requestedPort = savedPorts[ep.GuestPort]
+		requestedPort := savedPorts[ep.GuestPort]
+		if requestedPort == 0 {
+			log.Printf("instance %s: no saved public port for guest :%d (saved=%v), allocating a random one", inst.ID, ep.GuestPort, savedPorts)
 		}
 		if _, err := s.router.AllocatePort(inst.ID, ep.GuestPort, requestedPort, ep.Protocol); err != nil {
+			log.Printf("instance %s: restore public port :%d for guest :%d: %v", inst.ID, requestedPort, ep.GuestPort, err)
 			if requestedPort > 0 {
 				s.router.AllocatePort(inst.ID, ep.GuestPort, 0, ep.Protocol)
 			}

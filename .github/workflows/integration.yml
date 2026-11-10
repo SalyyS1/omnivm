@@ -9,6 +9,15 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run:
+        description: "go test -run pattern (empty = all tests)"
+        required: false
+        default: ""
+      count:
+        description: "go test -count (repeat to chase flaky tests)"
+        required: false
+        default: "1"
 
 jobs:
   integration:
@@ -51,9 +60,12 @@ jobs:
         run: sudo HOME=/root ./bin/ovm doctor
 
       - name: Integration tests (short)
+        env:
+          RUN: ${{ inputs.run }}
+          COUNT: ${{ inputs.count }}
         run: |
           sudo env "PATH=$PATH" HOME=/root GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" \
-            go test -tags integration -v -count=1 -short -timeout 30m ./test/integration/
+            go test -tags integration -v -count="${COUNT:-1}" -short -timeout 30m ${RUN:+-run "$RUN"} ./test/integration/
 
       - name: Daemon log on failure
         if: failure()
