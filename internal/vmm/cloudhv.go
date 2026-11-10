@@ -254,8 +254,8 @@ func (v *CloudHypervisorVMM) StartVM(h Handle) (ControlChannel, error) {
 		close(inst.done)
 	}()
 
-	// 6. Wait for API socket to appear
-	if err := waitForSocket(inst.apiSocket, 10*time.Second); err != nil {
+	// 6. Wait for the API socket to accept connections
+	if err := waitForUnixListener(inst.apiSocket, 10*time.Second); err != nil {
 		vsockLn.Close()
 		v.cleanupInstance(inst)
 		return nil, fmt.Errorf("cloud-hypervisor API socket: %w", err)
@@ -623,6 +623,26 @@ func waitForSocket(path string, timeout time.Duration) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("socket %s did not appear within %v", path, timeout)
+}
+
+// waitForUnixListener polls until a unix socket accepts connections.
+// The socket file appears at bind(), before the server calls listen(), so
+// waiting for the file alone races with the first request.
+// Only use it for servers that accept many clients: a probe connection
+// would be the one client of a single-client server such as virtiofsd.
+func waitForUnixListener(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		lastErr = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("socket %s not accepting connections within %v: %v", path, timeout, lastErr)
 }
 
 // runCmd runs a command and returns an error if it fails.
