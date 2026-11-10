@@ -138,6 +138,19 @@ func daemonClient() *http.Client {
 
 func apiPost(t *testing.T, path string, body interface{}) map[string]interface{} {
 	t.Helper()
+	status, data := apiPostRaw(t, path, body)
+	if status >= 400 {
+		t.Fatalf("POST %s returned %d: %s", path, status, data)
+	}
+	var result map[string]interface{}
+	json.Unmarshal(data, &result)
+	return result
+}
+
+// apiPostRaw posts JSON and returns the status code and body without
+// failing on HTTP errors, for tests that expect a rejection.
+func apiPostRaw(t *testing.T, path string, body interface{}) (int, []byte) {
+	t.Helper()
 	bodyJSON, _ := json.Marshal(body)
 	client := daemonClient()
 	resp, err := client.Post("http://ovm"+path, "application/json", bytes.NewReader(bodyJSON))
@@ -146,12 +159,7 @@ func apiPost(t *testing.T, path string, body interface{}) map[string]interface{}
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
-	var result map[string]interface{}
-	json.Unmarshal(data, &result)
-	if resp.StatusCode >= 400 {
-		t.Fatalf("POST %s returned %d: %s", path, resp.StatusCode, data)
-	}
-	return result
+	return resp.StatusCode, data
 }
 
 func apiDelete(t *testing.T, path string) {
