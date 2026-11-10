@@ -58,3 +58,47 @@ jobs:
       - name: Daemon log on failure
         if: failure()
         run: sudo find /root/.omnivm -name '*.log' -maxdepth 3 -exec tail -n 200 {} + || true
+
+  benchmark:
+    # Baseline lifecycle numbers on a GitHub-hosted runner. Shared, nested-
+    # virtualization hardware: use the numbers for regressions, not marketing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare KVM host
+        run: |
+          test -e /dev/kvm || { echo "::error::/dev/kvm missing"; exit 1; }
+          sudo apt-get update
+          sudo apt-get install -y virtiofsd e2fsprogs iptables iproute2
+          make all cloud-hypervisor
+          sudo make kernel HOME=/root
+          sudo install -m 0755 bin/cloud-hypervisor /usr/local/bin/cloud-hypervisor
+
+      - name: Start ovmd
+        run: |
+          sudo HOME=/root nohup ./bin/ovmd > /tmp/ovmd.log 2>&1 &
+          for i in $(seq 1 50); do sudo test -S /root/.omnivm/ovmd.sock && exit 0; sleep 0.2; done
+          cat /tmp/ovmd.log; exit 1
+
+      - name: Lifecycle latency and RSS
+        run: |
+          sudo python3 scripts/bench/lifecycle-latency.py \
+            --socket /root/.omnivm/ovmd.sock --runs 20 --vms 5 \
+            --json bench-results.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            bench-results.json
+            /tmp/ovmd.log
