@@ -34,7 +34,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
-          grep -E -c '(vmx|svm)' /proc/cpuinfo || true
+          grep -m1 'model name' /proc/cpuinfo; uname -r
 
       - name: Install host dependencies
         run: |

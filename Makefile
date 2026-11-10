@@ -29,7 +29,7 @@ GUEST_OS := linux
 GUEST_ARCH := $(HOST_ARCH)
 
 # Pinned Cloud Hypervisor release and guest kernel release
-CH_VERSION := v43.0
+CH_VERSION := v54.0
 CH_KERNEL_RELEASE := ch-release-v6.16.9-20251112
 
 ALL_TARGETS := ovmd ovm harness mcp mcp-guest
