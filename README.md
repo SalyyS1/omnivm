@@ -4,7 +4,7 @@ Scale-to-zero microVMs for running untrusted workloads on Linux hosts.
 
 OmniVM runs each workload in its own [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM with its own kernel. Any OCI image can be the root filesystem. Idle VMs are paused and later shut down; an incoming connection, exec or message wakes them again.
 
-> **Status: pre-alpha.** OmniVM is a fork of [AegisVM](https://github.com/xfeldman/aegisvm) that is being reworked for multi-tenant servers. It is **not** safe for hostile multi-tenant use yet: network isolation between VMs, resource limits, and host hardening are on the [roadmap](#roadmap) and not done. No performance numbers are published until they are measured with the benchmark scripts in this repository.
+> **Status: pre-alpha.** OmniVM is a fork of [AegisVM](https://github.com/xfeldman/aegisvm) that is being reworked for multi-tenant servers. It is **not** safe for hostile multi-tenant use yet: network isolation between VMs, resource limits, and host hardening are on the [roadmap](#roadmap) and not done. Performance numbers are only published together with the benchmark script and host that produced them; see [docs/benchmarks.md](docs/benchmarks.md).
 
 ## What it does today
 
@@ -63,6 +63,8 @@ Multi-node clustering, live migration and GPU passthrough are out of scope for v
 - [Secrets](docs/SECRETS.md)
 - [Workspaces](docs/WORKSPACES.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Benchmarks](docs/benchmarks.md)
+- [Development environment](docs/development-environment.md)
 
 ## Upstream and license
 
