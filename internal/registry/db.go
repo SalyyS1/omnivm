@@ -22,15 +22,21 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("create db directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// Pragmas go in the DSN so every pooled connection gets them; a plain
+	// PRAGMA statement only configures whichever connection runs it.
+	//   - busy_timeout: the daemon writes from many goroutines; without it a
+	//     contended write fails at once with SQLITE_BUSY and the update is lost.
+	//   - journal_mode=WAL: readers do not block the writer.
+	//   - synchronous=NORMAL: durable across process crashes in WAL mode.
+	dsn := "file:" + filepath.ToSlash(dbPath) +
+		"?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-
-	// Enable WAL mode for better concurrent read performance
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("set WAL mode: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
 	rdb := &DB{db: db}
