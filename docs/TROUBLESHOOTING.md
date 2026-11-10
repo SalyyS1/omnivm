@@ -48,7 +48,7 @@ Searchable FAQ for common OmniVM issues. Each entry states the problem, explains
 **Fix:**
 1. Stop the daemon: `ovm down`
 2. Remove all data: `rm -rf ~/.omnivm/`
-3. This deletes: database, images, overlays, workspaces, snapshots, logs, master key.
+3. This deletes: database, images, overlays, workspaces, logs, master key.
 4. You will need to re-set all secrets. The kernel at `~/.omnivm/kernel/vmlinux` is also removed; run `make kernel` again.
 
 ---

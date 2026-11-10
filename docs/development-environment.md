@@ -34,7 +34,7 @@ sudo env "PATH=$PATH" HOME=/root go test -tags integration -v -count=1 -short ./
 ```
 
 The tests start their own `ovmd`. They need root because the daemon creates tap
-devices and NAT rules. `-short` skips the slow pause/snapshot tests.
+devices and NAT rules. `-short` skips the slow pause and stop/start tests.
 
 ## Pinned versions
 

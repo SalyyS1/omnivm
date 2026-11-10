@@ -86,7 +86,7 @@ curl http://127.0.0.1:8080/
 ```
 
 The router in `ovmd` owns exposed ports and proxies traffic with wake-on-connect.
-An idle instance is paused after 60 seconds and stopped (memory snapshot to disk)
+An idle instance is paused after 60 seconds and stopped (VM shut down, no memory snapshot)
 after 5 minutes. The next connection wakes it.
 
 The router currently listens on `127.0.0.1` only.
@@ -133,7 +133,6 @@ commands, read logs, and manage secrets.
 | `~/.omnivm/data/overlays/` | Per-instance root filesystems |
 | `~/.omnivm/data/workspaces/` | Workspace directories |
 | `~/.omnivm/data/logs/` | Per-instance NDJSON logs |
-| `~/.omnivm/data/snapshots/` | VM memory snapshots |
 | `~/.omnivm/kernel/vmlinux` | MicroVM kernel |
 | `~/.omnivm/master.key` | Secret encryption key |
 

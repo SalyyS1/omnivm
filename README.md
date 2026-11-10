@@ -2,7 +2,7 @@
 
 Scale-to-zero microVMs for running untrusted workloads on Linux hosts.
 
-OmniVM runs each workload in its own [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM with its own kernel. Any OCI image can be the root filesystem. Idle VMs are paused and then snapshotted to disk; an incoming connection or message wakes them again.
+OmniVM runs each workload in its own [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM with its own kernel. Any OCI image can be the root filesystem. Idle VMs are paused and later shut down; an incoming connection, exec or message wakes them again.
 
 > **Status: pre-alpha.** OmniVM is a fork of [AegisVM](https://github.com/xfeldman/aegisvm) that is being reworked for multi-tenant servers. It is **not** safe for hostile multi-tenant use yet: network isolation between VMs, resource limits, and host hardening are on the [roadmap](#roadmap) and not done. No performance numbers are published until they are measured with the benchmark scripts in this repository.
 
@@ -10,7 +10,7 @@ OmniVM runs each workload in its own [Cloud Hypervisor](https://github.com/cloud
 
 - Boots an OCI image (`python:3.12-alpine` by default) as a microVM on Cloud Hypervisor + KVM.
 - Runs one process per VM under a small guest init (`ovm-harness`) that talks to the host over vsock.
-- Pauses idle VMs, then snapshots their memory to disk and stops them; restores on the next request.
+- Pauses idle VMs (memory stays resident) and stops them after a longer idle period; an incoming connection or exec resumes a paused VM or cold-boots a stopped one. Memory snapshots to disk are not implemented yet.
 - Exposes guest ports through a host router with wake-on-connect.
 - Mounts host directories into the guest with virtiofs.
 - Stores secrets encrypted at rest and injects them only into instances that ask for them.
@@ -48,7 +48,7 @@ The v1 goal is a single Linux node that can safely host many tenants, with every
 2. Multi-tenant network isolation: IP allocation with reuse, nftables instead of shell `iptables`, anti-spoofing, no VM-to-VM or host-internal access, egress limits.
 3. Copy-on-write instance disks, cgroup v2 limits, disk I/O limits, Prometheus metrics.
 4. Unprivileged VMM processes, daemon restarts that keep VMs running, per-tenant API keys.
-5. Memory density: balloon, memory-pressure-driven hibernation, safe snapshot restore (clock and entropy).
+5. Memory density: balloon, snapshot to disk on idle with safe restore (clock and entropy), memory-pressure-driven hibernation.
 6. Public ingress routed by Host/SNI, with protection against wake storms.
 
 Multi-node clustering, live migration and GPU passthrough are out of scope for v1.
