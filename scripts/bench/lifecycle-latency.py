@@ -73,6 +73,24 @@ class Client:
         body = {"handle": handle, "image_ref": image, "command": ["sleep", "3600"]}
         return self.call("POST", "/v1/instances", body)["id"]
 
+    def exec_output(self, inst_id, command):
+        """Run a command in the guest and return its stdout lines."""
+        conn = UnixHTTPConnection(self.sock_path)
+        conn.request("POST", f"/v1/instances/{inst_id}/exec", body=json.dumps({"command": command}).encode(),
+                     headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        if resp.status >= 400:
+            raise RuntimeError(f"exec {command} -> {resp.status}: {resp.read().decode(errors='replace')}")
+        lines = []
+        for raw in resp:
+            entry = json.loads(raw)
+            if entry.get("done"):
+                break
+            if entry.get("stream") == "stdout" and "line" in entry:
+                lines.append(entry["line"])
+        conn.close()
+        return lines
+
     def delete(self, inst_id):
         try:
             self.call("DELETE", f"/v1/instances/{inst_id}")
@@ -183,12 +201,19 @@ def main():
         for i in range(args.vms):
             ids.append(timed_start(client, f"bench-rss-{i}", args.image)[0])
         time.sleep(5)  # let guests settle
+        harness = []
+        for inst_id in ids:
+            out = client.exec_output(inst_id, ["sh", "-c", "grep VmRSS /proc/1/status"])
+            for line in out:
+                if line.startswith("VmRSS:"):
+                    harness.append(int(line.split()[1]))
         ch = process_rss_kb("cloud-hypervisor")
         vfs = process_rss_kb("virtiofsd")
         results["rss"] = {
             "vms": args.vms,
             "cloud_hypervisor_kb_avg": round(statistics.mean(ch)) if ch else None,
             "virtiofsd_kb_avg": round(statistics.mean(vfs)) if vfs else None,
+            "guest_harness_kb_avg": round(statistics.mean(harness)) if harness else None,
             "guest_memory_mb": "daemon default",
         }
     finally:
@@ -206,7 +231,7 @@ def main():
         print(f"| {label} | {r['n']} | {r['p50_ms']} | {r['p95_ms']} | {r['min_ms']} | {r['max_ms']} |")
     rss = results["rss"]
     print(f"\nIdle host RSS with {rss['vms']} VMs: cloud-hypervisor avg {rss['cloud_hypervisor_kb_avg']} KB/VM, "
-          f"virtiofsd avg {rss['virtiofsd_kb_avg']} KB")
+          f"virtiofsd avg {rss['virtiofsd_kb_avg']} KB, guest ovm-harness (PID 1) avg {rss['guest_harness_kb_avg']} KB")
 
     if args.json:
         with open(args.json, "w") as f:
