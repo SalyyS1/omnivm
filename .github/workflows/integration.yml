@@ -89,6 +89,7 @@ jobs:
           cat /tmp/ovmd.log; exit 1
 
       - name: Lifecycle latency and RSS
+        shell: bash -eo pipefail {0}
         run: |
           sudo python3 scripts/bench/lifecycle-latency.py \
             --socket /root/.omnivm/ovmd.sock --runs 20 --vms 5 \

@@ -310,8 +310,10 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 			"size":   memBytes,
 			"shared": true,
 		},
+		// The root disk is always a raw ext4 image. Cloud Hypervisor requires
+		// an explicit image type instead of probing the file format.
 		"disks": []map[string]interface{}{
-			{"path": cfg.Rootfs.Path},
+			{"path": cfg.Rootfs.Path, "image_type": "Raw"},
 		},
 		"net": []map[string]interface{}{
 			{"tap": inst.tapName},
