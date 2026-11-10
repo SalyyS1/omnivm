@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -12,10 +13,27 @@ import (
 
 const guestAPIAddr = "127.0.0.1:7777"
 
-// startGuestAPIServer starts the guest-facing HTTP API on localhost:7777.
+// startGuestAPIServer binds the guest-facing HTTP API on localhost:7777 and
+// serves it in the background. The socket is bound before this returns, so a
+// workload started afterwards can call the API immediately.
 // Guest processes call this to spawn/manage child instances via the host.
 // No authentication required — the harness attaches the capability token automatically.
 func startGuestAPIServer(hrpc *harnessRPC) {
+	ln, err := net.Listen("tcp", guestAPIAddr)
+	if err != nil {
+		log.Printf("guest API server: %v", err)
+		return
+	}
+	log.Printf("guest API listening on %s", guestAPIAddr)
+	go func() {
+		if err := http.Serve(ln, newGuestAPIMux(hrpc)); err != nil {
+			log.Printf("guest API server: %v", err)
+		}
+	}()
+}
+
+// newGuestAPIMux builds the guest API routes.
+func newGuestAPIMux(hrpc *harnessRPC) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Instance management
@@ -63,10 +81,7 @@ func startGuestAPIServer(hrpc *harnessRPC) {
 		handleGuestUnexpose(w, r, hrpc)
 	})
 
-	log.Printf("guest API listening on %s", guestAPIAddr)
-	if err := http.ListenAndServe(guestAPIAddr, mux); err != nil {
-		log.Printf("guest API server: %v", err)
-	}
+	return mux
 }
 
 // handleGuestSpawn spawns a child instance via the host.
