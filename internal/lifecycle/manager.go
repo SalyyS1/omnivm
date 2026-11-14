@@ -925,6 +925,13 @@ func (m *Manager) bootInstanceLocked(ctx context.Context, inst *Instance) error 
 		vcpus = instVCPUs
 	}
 
+	// Re-snapshot ExposePorts right before CreateVM so ports exposed during image
+	// rootfs preparation or ext4 disk creation are passed directly to CreateVM.
+	inst.mu.Lock()
+	exposePortsSnapshot = make([]vmm.PortExpose, len(inst.ExposePorts))
+	copy(exposePortsSnapshot, inst.ExposePorts)
+	inst.mu.Unlock()
+
 	vmCfg := vmm.VMConfig{
 		Rootfs: vmm.RootFS{
 			Type: m.vmm.Capabilities().RootFSType,
@@ -1086,41 +1093,134 @@ func (m *Manager) bootInstanceLocked(ctx context.Context, inst *Instance) error 
 		return failBoot(fmt.Errorf("run failed: %s", respObj.Error.Message))
 	}
 
-	// Transition to RUNNING unless concurrently stopped or disabled while booting
-	inst.mu.Lock()
-	if inst.State != StateStarting || !inst.Enabled {
-		disabled := !inst.Enabled
-		inst.broadcastLocked()
-		inst.mu.Unlock()
-		demux.Stop()
-		ch.Close()
-		m.vmm.StopVM(handle)
-		if disabled {
-			return ErrInstanceDisabled
-		}
-		return ErrInstanceStopped
+	// Reconcile any ExposePort or UnexposePort mutations that arrived while State == StateStarting
+	// so VMM endpoints match inst.ExposePorts atomically when transitioning to StateRunning.
+	currentEndpoints := endpoints
+	reconciledPorts := make(map[int]bool, len(exposePortsSnapshot))
+	for _, ep := range exposePortsSnapshot {
+		reconciledPorts[ep.GuestPort] = true
 	}
+	notifiedPorts := make(map[int]bool, len(ports))
+	for _, p := range ports {
+		notifiedPorts[p] = true
+	}
+	dynamicExposer, canDynamicExpose := m.vmm.(interface {
+		DynamicExposePort(vmm.Handle, int) (int, error)
+	})
+	dynamicUnexposer, canDynamicUnexpose := m.vmm.(interface {
+		DynamicUnexposePort(vmm.Handle, int) error
+	})
 
-	if respObj.Result.Version != "" {
-		inst.HarnessVersion = respObj.Result.Version
+	for {
+		inst.mu.Lock()
+		if inst.State != StateStarting || !inst.Enabled {
+			disabled := !inst.Enabled
+			inst.broadcastLocked()
+			inst.mu.Unlock()
+			demux.Stop()
+			ch.Close()
+			m.vmm.StopVM(handle)
+			if disabled {
+				return ErrInstanceDisabled
+			}
+			return ErrInstanceStopped
+		}
+
+		var toExpose []vmm.PortExpose
+		var toUnexpose []int
+		desiredSet := make(map[int]vmm.PortExpose, len(inst.ExposePorts))
+		for _, ep := range inst.ExposePorts {
+			desiredSet[ep.GuestPort] = ep
+			if !reconciledPorts[ep.GuestPort] {
+				toExpose = append(toExpose, ep)
+			}
+		}
+		for p, active := range reconciledPorts {
+			if active {
+				if _, stillDesired := desiredSet[p]; !stillDesired {
+					toUnexpose = append(toUnexpose, p)
+				}
+			}
+		}
+
+		if len(toExpose) == 0 && len(toUnexpose) == 0 {
+			if respObj.Result.Version != "" {
+				inst.HarnessVersion = respObj.Result.Version
+			}
+			runNow := time.Now()
+			inst.Handle = handle
+			inst.Channel = ch
+			inst.Endpoints = currentEndpoints
+			inst.State = StateRunning
+			inst.lastActivity = runNow
+			inst.UpdatedAt = runNow
+			inst.demuxer = demux
+			inst.logCapture = true
+			inst.lastBootErr = nil
+			inst.broadcastLocked()
+			inst.mu.Unlock()
+			break
+		}
+		inst.mu.Unlock()
+
+		for _, guestPort := range toUnexpose {
+			if canDynamicUnexpose {
+				_ = dynamicUnexposer.DynamicUnexposePort(handle, guestPort)
+			}
+			filtered := make([]vmm.HostEndpoint, 0, len(currentEndpoints))
+			for _, ep := range currentEndpoints {
+				if ep.GuestPort != guestPort {
+					filtered = append(filtered, ep)
+				}
+			}
+			currentEndpoints = filtered
+			reconciledPorts[guestPort] = false
+			if notifiedPorts[guestPort] {
+				notifiedPorts[guestPort] = false
+				demux.SendNotification("ports_changed", map[string]interface{}{
+					"action":     "unexpose",
+					"guest_port": guestPort,
+				})
+			}
+		}
+
+		for _, ep := range toExpose {
+			reconciledPorts[ep.GuestPort] = true
+			if canDynamicExpose {
+				if hostPort, err := dynamicExposer.DynamicExposePort(handle, ep.GuestPort); err != nil {
+					log.Printf("instance %s: boot endpoint reconcile expose %d failed: %v", inst.ID, ep.GuestPort, err)
+				} else if eps, err := m.vmm.HostEndpoints(handle); err == nil {
+					currentEndpoints = eps
+				} else {
+					currentEndpoints = append(currentEndpoints, vmm.HostEndpoint{
+						GuestPort: ep.GuestPort,
+						HostPort:  hostPort,
+						Protocol:  ep.Protocol,
+					})
+				}
+			}
+			if !notifiedPorts[ep.GuestPort] {
+				notifiedPorts[ep.GuestPort] = true
+				pubPort := 0
+				if m.getPublicPorts != nil {
+					if pp, ok := m.getPublicPorts(inst.ID)[ep.GuestPort]; ok {
+						pubPort = pp
+					}
+				}
+				demux.SendNotification("ports_changed", map[string]interface{}{
+					"action":      "expose",
+					"guest_port":  ep.GuestPort,
+					"public_port": pubPort,
+					"protocol":    ep.Protocol,
+				})
+			}
+		}
 	}
-	runNow := time.Now()
-	inst.Handle = handle
-	inst.Channel = ch
-	inst.Endpoints = endpoints
-	inst.State = StateRunning
-	inst.lastActivity = runNow
-	inst.UpdatedAt = runNow
-	inst.demuxer = demux
-	inst.logCapture = true
-	inst.lastBootErr = nil
-	inst.broadcastLocked()
-	inst.mu.Unlock()
 
 	atomic.AddUint64(&m.metrics.coldStarts, 1)
 	m.notifyStateChange(inst.ID, StateRunning)
 	m.startIdleTimer(inst)
-	log.Printf("instance %s: running (endpoints: %v)", inst.ID, endpoints)
+	log.Printf("instance %s: running (endpoints: %v)", inst.ID, currentEndpoints)
 	return nil
 }
 

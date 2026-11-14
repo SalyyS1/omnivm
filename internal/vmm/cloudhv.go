@@ -447,14 +447,20 @@ func (v *CloudHypervisorVMM) HostEndpoints(h Handle) ([]HostEndpoint, error) {
 }
 
 // DynamicExposePort registers a new port endpoint at runtime.
-// With tap networking, the router dials the guest IP directly — no port
-// forwarding setup needed, just add the endpoint so GetEndpoint finds it.
+// With tap networking, the router dials the guest IP directly; no port
+// forwarding setup is needed, just register the endpoint so GetEndpoint finds it.
 func (v *CloudHypervisorVMM) DynamicExposePort(h Handle, guestPort int) (int, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	inst, ok := v.instances[h.ID]
 	if !ok {
 		return 0, fmt.Errorf("vm %s not found", h.ID)
+	}
+
+	for _, ep := range inst.endpoints {
+		if ep.GuestPort == guestPort {
+			return ep.HostPort, nil
+		}
 	}
 
 	inst.endpoints = append(inst.endpoints, HostEndpoint{
@@ -466,6 +472,26 @@ func (v *CloudHypervisorVMM) DynamicExposePort(h Handle, guestPort int) (int, er
 
 	log.Printf("vmm: dynamic expose guest:%d (vm %s, guest %s)", guestPort, h.ID, inst.guestIP)
 	return guestPort, nil
+}
+
+// DynamicUnexposePort removes a dynamically or statically exposed guest port endpoint at runtime.
+func (v *CloudHypervisorVMM) DynamicUnexposePort(h Handle, guestPort int) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	inst, ok := v.instances[h.ID]
+	if !ok {
+		return fmt.Errorf("vm %s not found", h.ID)
+	}
+
+	filtered := inst.endpoints[:0]
+	for _, ep := range inst.endpoints {
+		if ep.GuestPort != guestPort {
+			filtered = append(filtered, ep)
+		}
+	}
+	inst.endpoints = filtered
+	log.Printf("vmm: dynamic unexpose guest:%d (vm %s)", guestPort, h.ID)
+	return nil
 }
 
 func (v *CloudHypervisorVMM) Capabilities() BackendCaps {

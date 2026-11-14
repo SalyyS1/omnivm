@@ -465,3 +465,188 @@ func TestScaleToZero_FullIdleTransitionAndSnapshotRaceSafety(t *testing.T) {
 		t.Errorf("ColdStarts after wake = %d, want 2", got)
 	}
 }
+
+// dynamicEndpointVMM models CloudHypervisorVMM's endpoint lifecycle: CreateVM populates
+// endpoints from cfg.ExposePorts, and DynamicExposePort / DynamicUnexposePort mutate
+// the live VM's endpoint table at runtime.
+type dynamicEndpointVMM struct {
+	*barrierVMM
+	mu               sync.Mutex
+	endpoints        map[string][]vmm.HostEndpoint
+	guestIP          string
+	dynExposeCalls   int64
+	dynUnexposeCalls int64
+}
+
+func newDynamicEndpointVMM(guestIP string) *dynamicEndpointVMM {
+	return &dynamicEndpointVMM{
+		barrierVMM: newBarrierVMM(),
+		endpoints:  make(map[string][]vmm.HostEndpoint),
+		guestIP:    guestIP,
+	}
+}
+
+func (d *dynamicEndpointVMM) CreateVM(cfg vmm.VMConfig) (vmm.Handle, error) {
+	h, err := d.barrierVMM.CreateVM(cfg)
+	if err != nil {
+		return h, err
+	}
+	d.mu.Lock()
+	var eps []vmm.HostEndpoint
+	for _, ep := range cfg.ExposePorts {
+		eps = append(eps, vmm.HostEndpoint{
+			GuestPort:   ep.GuestPort,
+			HostPort:    ep.GuestPort,
+			Protocol:    ep.Protocol,
+			BackendAddr: d.guestIP,
+		})
+	}
+	d.endpoints[h.ID] = eps
+	d.mu.Unlock()
+	return h, nil
+}
+
+func (d *dynamicEndpointVMM) HostEndpoints(h vmm.Handle) ([]vmm.HostEndpoint, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	src := d.endpoints[h.ID]
+	out := make([]vmm.HostEndpoint, len(src))
+	copy(out, src)
+	return out, nil
+}
+
+func (d *dynamicEndpointVMM) DynamicExposePort(h vmm.Handle, guestPort int) (int, error) {
+	atomic.AddInt64(&d.dynExposeCalls, 1)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, ep := range d.endpoints[h.ID] {
+		if ep.GuestPort == guestPort {
+			return ep.HostPort, nil
+		}
+	}
+	d.endpoints[h.ID] = append(d.endpoints[h.ID], vmm.HostEndpoint{
+		GuestPort:   guestPort,
+		HostPort:    guestPort,
+		Protocol:    "tcp",
+		BackendAddr: d.guestIP,
+	})
+	return guestPort, nil
+}
+
+func (d *dynamicEndpointVMM) DynamicUnexposePort(h vmm.Handle, guestPort int) error {
+	atomic.AddInt64(&d.dynUnexposeCalls, 1)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var kept []vmm.HostEndpoint
+	for _, ep := range d.endpoints[h.ID] {
+		if ep.GuestPort != guestPort {
+			kept = append(kept, ep)
+		}
+	}
+	d.endpoints[h.ID] = kept
+	return nil
+}
+
+func TestBootInstance_ExposePortDuringStateStartingReconcilesEndpoint(t *testing.T) {
+	dv := newDynamicEndpointVMM("172.16.0.42")
+	startEntered := make(chan struct{})
+	allowStart := make(chan struct{})
+	var once sync.Once
+	dv.onStart = func() {
+		once.Do(func() { close(startEntered) })
+		<-allowStart
+	}
+
+	m := newCustomManager(t, dv, 10*time.Minute, 20*time.Minute)
+	m.OnExposePort(func(id string, guestPort, publicPort int, protocol string) (int, error) {
+		if publicPort > 0 {
+			return publicPort, nil
+		}
+		return 38080, nil
+	})
+	m.SetPublicPortsLookup(func(id string) map[int]int {
+		return map[int]int{80: 38080}
+	})
+
+	// Create instance with NO initial exposed ports (matching POST /v1/instances followed by POST /expose).
+	inst := m.CreateInstance("inst-midboot-expose", []string{"python3", "-m", "http.server", "80"}, nil)
+
+	bootDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		bootDone <- m.EnsureInstance(ctx, "inst-midboot-expose")
+	}()
+
+	// Wait until CreateVM has already completed with ExposePorts=[] and StartVM is parked.
+	<-startEntered
+	if got := inst.GetState(); got != StateStarting {
+		t.Fatalf("state during StartVM = %q, want %q", got, StateStarting)
+	}
+
+	// Expose guest port 80 while the VM is mid-boot (StateStarting).
+	pubPort, err := m.ExposePort("inst-midboot-expose", 80, 0, "http")
+	if err != nil {
+		t.Fatalf("ExposePort during StateStarting failed: %v", err)
+	}
+	if pubPort != 38080 {
+		t.Fatalf("allocated public port = %d, want 38080", pubPort)
+	}
+
+	close(allowStart)
+	if err := <-bootDone; err != nil {
+		t.Fatalf("EnsureInstance failed: %v", err)
+	}
+
+	// Immediately upon EnsureInstance returning, GetEndpoint MUST resolve the reconciled tap endpoint.
+	ep, err := m.GetEndpoint("inst-midboot-expose", 80)
+	if err != nil {
+		t.Fatalf("GetEndpoint(80) after mid-boot ExposePort failed: %v", err)
+	}
+	if ep != "172.16.0.42:80" {
+		t.Errorf("GetEndpoint(80) = %q, want %q", ep, "172.16.0.42:80")
+	}
+	if got := atomic.LoadInt64(&dv.dynExposeCalls); got != 1 {
+		t.Errorf("DynamicExposePort calls = %d, want 1", got)
+	}
+}
+
+func TestBootInstance_UnexposePortDuringStateStartingRemovesEndpoint(t *testing.T) {
+	dv := newDynamicEndpointVMM("172.16.0.43")
+	startEntered := make(chan struct{})
+	allowStart := make(chan struct{})
+	var once sync.Once
+	dv.onStart = func() {
+		once.Do(func() { close(startEntered) })
+		<-allowStart
+	}
+
+	m := newCustomManager(t, dv, 10*time.Minute, 20*time.Minute)
+	m.CreateInstance("inst-midboot-unexpose", []string{"python3", "-m", "http.server", "8080"}, []vmm.PortExpose{
+		{GuestPort: 8080, Protocol: "http"},
+	})
+
+	bootDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		bootDone <- m.EnsureInstance(ctx, "inst-midboot-unexpose")
+	}()
+
+	<-startEntered
+	if err := m.UnexposePort("inst-midboot-unexpose", 8080); err != nil {
+		t.Fatalf("UnexposePort during StateStarting failed: %v", err)
+	}
+
+	close(allowStart)
+	if err := <-bootDone; err != nil {
+		t.Fatalf("EnsureInstance failed: %v", err)
+	}
+
+	if _, err := m.GetEndpoint("inst-midboot-unexpose", 8080); err == nil {
+		t.Fatal("expected GetEndpoint(8080) to fail after mid-boot UnexposePort, but got nil error")
+	}
+	if got := atomic.LoadInt64(&dv.dynUnexposeCalls); got != 1 {
+		t.Errorf("DynamicUnexposePort calls = %d, want 1", got)
+	}
+}
