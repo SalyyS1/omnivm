@@ -40,6 +40,7 @@ type Server struct {
 	mux         *http.ServeMux
 	server      *http.Server
 	ln          net.Listener
+	startedAt   time.Time
 }
 
 // NewServer creates a new API server.
@@ -53,6 +54,7 @@ func NewServer(cfg *config.Config, v vmm.VMM, lm *lifecycle.Manager, reg *regist
 		logStore:    ls,
 		router:      rtr,
 		mux:         http.NewServeMux(),
+		startedAt:   time.Now(),
 	}
 	s.registerRoutes()
 	s.server = &http.Server{Handler: s.mux}
@@ -96,8 +98,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/secrets/{name}", s.handleGetSecret)
 	s.mux.HandleFunc("DELETE /v1/secrets/{name}", s.handleDeleteSecret)
 
-	// Status
+	// Status and telemetry
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	s.mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
 }
 
 // Start begins listening on the unix socket.
@@ -131,28 +134,94 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-// Status response
+// Status and metrics responses
 
 type statusResponse struct {
-	Status       string                 `json:"status"`
-	Version      string                 `json:"version"`
-	Backend      string                 `json:"backend"`
-	Capabilities map[string]interface{} `json:"capabilities"`
+	Status        string                        `json:"status"`
+	Version       string                        `json:"version"`
+	Backend       string                        `json:"backend"`
+	UptimeSeconds int64                         `json:"uptime_seconds"`
+	Capabilities  map[string]interface{}        `json:"capabilities"`
+	Instances     lifecycle.InstanceStateCounts `json:"instances"`
+	Metrics       lifecycle.LifecycleMetrics    `json:"metrics"`
+}
+
+type metricsResponse struct {
+	Timestamp     string                        `json:"timestamp"`
+	Version       string                        `json:"version"`
+	Backend       string                        `json:"backend"`
+	UptimeSeconds int64                         `json:"uptime_seconds"`
+	Instances     lifecycle.InstanceStateCounts `json:"instances"`
+	Lifecycle     lifecycle.LifecycleMetrics    `json:"lifecycle"`
+	Router        router.RouterMetrics          `json:"router"`
+}
+
+func (s *Server) uptimeSeconds() int64 {
+	if s.startedAt.IsZero() {
+		return 0
+	}
+	secs := int64(time.Since(s.startedAt).Seconds())
+	if secs < 0 {
+		return 0
+	}
+	return secs
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	caps := s.vmm.Capabilities()
+	var caps vmm.BackendCaps
+	if s.vmm != nil {
+		caps = s.vmm.Capabilities()
+	}
+
+	var counts lifecycle.InstanceStateCounts
+	var lmMetrics lifecycle.LifecycleMetrics
+	if s.lifecycle != nil {
+		counts = s.lifecycle.InstanceCounts()
+		lmMetrics = s.lifecycle.Metrics()
+	}
 
 	writeJSON(w, http.StatusOK, statusResponse{
-		Status:  "running",
-		Version: version.Version(),
-		Backend: caps.Name,
+		Status:        "running",
+		Version:       version.Version(),
+		Backend:       caps.Name,
+		UptimeSeconds: s.uptimeSeconds(),
 		Capabilities: map[string]interface{}{
 			"pause_resume":          caps.Pause,
 			"persistent_pause":      caps.PersistentPause,
 			"boot_from_disk_layers": true,
 			"network_backend":       caps.NetworkBackend,
 		},
+		Instances: counts,
+		Metrics:   lmMetrics,
+	})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	backendName := ""
+	if s.vmm != nil {
+		backendName = s.vmm.Capabilities().Name
+	}
+
+	var counts lifecycle.InstanceStateCounts
+	var lmMetrics lifecycle.LifecycleMetrics
+	if s.lifecycle != nil {
+		counts = s.lifecycle.InstanceCounts()
+		lmMetrics = s.lifecycle.Metrics()
+	}
+
+	var rtrMetrics router.RouterMetrics
+	if s.router != nil {
+		rtrMetrics = s.router.Metrics()
+	}
+
+	writeJSON(w, http.StatusOK, metricsResponse{
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Version:       version.Version(),
+		Backend:       backendName,
+		UptimeSeconds: s.uptimeSeconds(),
+		Instances:     counts,
+		Lifecycle:     lmMetrics,
+		Router:        rtrMetrics,
 	})
 }
 
@@ -269,7 +338,7 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 
 	// Create in lifecycle manager.
 	// This triggers onInstanceCreated which handles router port allocation
-	// and registry persistence — same path as guest API spawns.
+	// and registry persistence - same path as guest API spawns.
 	s.lifecycle.CreateInstance(id, req.Command, nil, opts...)
 
 	// Boot the instance
@@ -297,11 +366,12 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRestartOrConflict handles idempotent instance start:
-// STOPPED → restart using stored config
-// RUNNING/STARTING/PAUSED → 409 conflict
+// STOPPED -> restart using stored config
+// RUNNING/STARTING/PAUSED -> 409 conflict
 func (s *Server) handleRestartOrConflict(w http.ResponseWriter, inst *lifecycle.Instance, req createInstanceRequest) {
-	if inst.State != lifecycle.StateStopped {
-		writeError(w, http.StatusConflict, fmt.Sprintf("instance %q is %s", req.Handle, inst.State))
+	snap := inst.Snapshot()
+	if snap.State != lifecycle.StateStopped {
+		writeError(w, http.StatusConflict, fmt.Sprintf("instance %q is %s", req.Handle, snap.State))
 		return
 	}
 
@@ -314,25 +384,25 @@ func (s *Server) handleRestartOrConflict(w http.ResponseWriter, inst *lifecycle.
 	s.ensurePortListeners(inst)
 
 	// Re-enable and boot via StartInstance (sets Enabled=true + boots).
-	go func() {
+	go func(instanceID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		if err := s.lifecycle.StartInstance(ctx, inst.ID); err != nil {
-			log.Printf("instance %s restart failed: %v", inst.ID, err)
+		if err := s.lifecycle.StartInstance(ctx, instanceID); err != nil {
+			log.Printf("instance %s restart failed: %v", instanceID, err)
 		}
-	}()
+	}(snap.ID)
 
 	if s.registry != nil {
-		s.registry.UpdateEnabled(inst.ID, true)
+		s.registry.UpdateEnabled(snap.ID, true)
 	}
 
 	resp := map[string]interface{}{
-		"id":      inst.ID,
+		"id":      snap.ID,
 		"state":   "starting",
-		"command": inst.Command,
+		"command": snap.Command,
 	}
-	if inst.HandleAlias != "" {
-		resp["handle"] = inst.HandleAlias
+	if snap.HandleAlias != "" {
+		resp["handle"] = snap.HandleAlias
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -351,54 +421,55 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	snap := inst.Snapshot()
 	resp := map[string]interface{}{
-		"id":                 inst.ID,
-		"state":              inst.State,
-		"enabled":            inst.Enabled,
-		"command":            inst.Command,
-		"created_at":         inst.CreatedAt.Format(time.RFC3339),
-		"last_active_at":     s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
-		"active_connections": s.lifecycle.ActiveConns(inst.ID),
+		"id":                 snap.ID,
+		"state":              snap.State,
+		"enabled":            snap.Enabled,
+		"command":            snap.Command,
+		"created_at":         snap.CreatedAt.Format(time.RFC3339),
+		"last_active_at":     snap.LastActivity.Format(time.RFC3339),
+		"active_connections": snap.ActiveConnections,
 	}
 
-	if inst.HandleAlias != "" {
-		resp["handle"] = inst.HandleAlias
+	if snap.HandleAlias != "" {
+		resp["handle"] = snap.HandleAlias
 	}
-	if inst.ImageRef != "" {
-		resp["image_ref"] = inst.ImageRef
+	if snap.ImageRef != "" {
+		resp["image_ref"] = snap.ImageRef
 	}
-	if inst.HarnessVersion != "" {
-		resp["harness_version"] = inst.HarnessVersion
+	if snap.HarnessVersion != "" {
+		resp["harness_version"] = snap.HarnessVersion
 	}
-	if len(inst.SecretKeys) > 0 {
-		resp["secret_keys"] = inst.SecretKeys
+	if len(snap.SecretKeys) > 0 {
+		resp["secret_keys"] = snap.SecretKeys
 	}
-	if inst.WorkspacePath != "" {
-		resp["workspace"] = inst.WorkspacePath
+	if snap.WorkspacePath != "" {
+		resp["workspace"] = snap.WorkspacePath
 	}
-	if !inst.StoppedAt.IsZero() {
-		resp["stopped_at"] = inst.StoppedAt.Format(time.RFC3339)
+	if !snap.StoppedAt.IsZero() {
+		resp["stopped_at"] = snap.StoppedAt.Format(time.RFC3339)
 	}
 
-	if inst.IdlePolicy != "" {
-		resp["idle_policy"] = inst.IdlePolicy
+	if snap.IdlePolicy != "" {
+		resp["idle_policy"] = snap.IdlePolicy
 	}
-	if held, reason, expiresAt := s.lifecycle.LeaseInfo(inst.ID); held {
+	if held, reason, expiresAt := s.lifecycle.LeaseInfo(snap.ID); held {
 		resp["lease_held"] = true
 		resp["lease_reason"] = reason
 		resp["lease_expires_at"] = expiresAt.Format(time.RFC3339)
 	}
 
-	if len(inst.ExposePorts) > 0 {
-		ports := make([]int, len(inst.ExposePorts))
-		for i, p := range inst.ExposePorts {
+	if len(snap.ExposePorts) > 0 {
+		ports := make([]int, len(snap.ExposePorts))
+		for i, p := range snap.ExposePorts {
 			ports[i] = p.GuestPort
 		}
 		resp["expose_ports"] = ports
 	}
 	// Show public (router-owned) endpoints
 	if s.router != nil {
-		publicEps := s.router.GetAllPublicPorts(inst.ID)
+		publicEps := s.router.GetAllPublicPorts(snap.ID)
 		if len(publicEps) > 0 {
 			eps := make([]map[string]interface{}, len(publicEps))
 			for i, ep := range publicEps {
@@ -416,7 +487,7 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 }
 
 // instanceSortKey returns a sort key for instance ordering:
-// running → paused → stopped → disabled, with disabled always last.
+// running -> paused -> stopped -> disabled, with disabled always last.
 func instanceSortKey(state string, enabled bool) int {
 	if !enabled {
 		return 99 // disabled always last
@@ -435,51 +506,55 @@ func instanceSortKey(state string, enabled bool) int {
 
 func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 	instances := s.lifecycle.ListInstances()
+	snaps := make([]lifecycle.InstanceSnapshot, len(instances))
+	for i, inst := range instances {
+		snaps[i] = inst.Snapshot()
+	}
 
-	// Stable sort: running → paused → stopped → disabled, then oldest first within each group.
+	// Stable sort: running -> paused -> stopped -> disabled, then oldest first within each group.
 	// Uses CreatedAt (immutable) as secondary key instead of UpdatedAt (changes on state transitions).
 	// ID as final tiebreaker since ListInstances() iterates a map (non-deterministic order).
-	sort.Slice(instances, func(i, j int) bool {
-		si := instanceSortKey(instances[i].State, instances[i].Enabled)
-		sj := instanceSortKey(instances[j].State, instances[j].Enabled)
+	sort.Slice(snaps, func(i, j int) bool {
+		si := instanceSortKey(snaps[i].State, snaps[i].Enabled)
+		sj := instanceSortKey(snaps[j].State, snaps[j].Enabled)
 		if si != sj {
 			return si < sj
 		}
-		if !instances[i].CreatedAt.Equal(instances[j].CreatedAt) {
-			return instances[i].CreatedAt.Before(instances[j].CreatedAt)
+		if !snaps[i].CreatedAt.Equal(snaps[j].CreatedAt) {
+			return snaps[i].CreatedAt.Before(snaps[j].CreatedAt)
 		}
-		return instances[i].ID < instances[j].ID
+		return snaps[i].ID < snaps[j].ID
 	})
 
 	// Optional state filter: ?state=stopped or ?state=running
 	stateFilter := r.URL.Query().Get("state")
 
-	result := make([]map[string]interface{}, 0, len(instances))
-	for _, inst := range instances {
-		if stateFilter != "" && inst.State != stateFilter {
+	result := make([]map[string]interface{}, 0, len(snaps))
+	for _, snap := range snaps {
+		if stateFilter != "" && snap.State != stateFilter {
 			continue
 		}
 		entry := map[string]interface{}{
-			"id":                 inst.ID,
-			"state":              inst.State,
-			"enabled":            inst.Enabled,
-			"command":            inst.Command,
-			"created_at":         inst.CreatedAt.Format(time.RFC3339),
-			"updated_at":         inst.UpdatedAt.Format(time.RFC3339),
-			"last_active_at":     s.lifecycle.LastActivity(inst.ID).Format(time.RFC3339),
-			"active_connections": s.lifecycle.ActiveConns(inst.ID),
+			"id":                 snap.ID,
+			"state":              snap.State,
+			"enabled":            snap.Enabled,
+			"command":            snap.Command,
+			"created_at":         snap.CreatedAt.Format(time.RFC3339),
+			"updated_at":         snap.UpdatedAt.Format(time.RFC3339),
+			"last_active_at":     snap.LastActivity.Format(time.RFC3339),
+			"active_connections": snap.ActiveConnections,
 		}
-		if inst.HandleAlias != "" {
-			entry["handle"] = inst.HandleAlias
+		if snap.HandleAlias != "" {
+			entry["handle"] = snap.HandleAlias
 		}
-		if inst.ImageRef != "" {
-			entry["image_ref"] = inst.ImageRef
+		if snap.ImageRef != "" {
+			entry["image_ref"] = snap.ImageRef
 		}
-		if !inst.StoppedAt.IsZero() {
-			entry["stopped_at"] = inst.StoppedAt.Format(time.RFC3339)
+		if !snap.StoppedAt.IsZero() {
+			entry["stopped_at"] = snap.StoppedAt.Format(time.RFC3339)
 		}
 		if s.router != nil {
-			publicEps := s.router.GetAllPublicPorts(inst.ID)
+			publicEps := s.router.GetAllPublicPorts(snap.ID)
 			if len(publicEps) > 0 {
 				eps := make([]map[string]interface{}, len(publicEps))
 				for i, ep := range publicEps {
@@ -511,7 +586,7 @@ func (s *Server) handleInstanceLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !inst.Enabled {
+	if !inst.IsEnabled() {
 		writeError(w, http.StatusConflict, "instance is disabled")
 		return
 	}
@@ -532,7 +607,7 @@ func (s *Server) handleInstanceLogs(w http.ResponseWriter, r *http.Request) {
 
 	il := s.logStore.Get(inst.ID)
 	if il == nil {
-		// No logs yet — return empty
+		// No logs yet - return empty
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.WriteHeader(http.StatusOK)
 		return
@@ -672,7 +747,7 @@ func (s *Server) handleExecInstance(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case exitCode := <-doneCh:
-			// Exec finished — drain any remaining buffered logs then send done
+			// Exec finished - drain any remaining buffered logs then send done
 			for {
 				select {
 				case entry := <-logCh:
@@ -744,29 +819,30 @@ func (s *Server) ensurePortListeners(inst *lifecycle.Instance) {
 	if s.router == nil {
 		return
 	}
-	existing := s.router.GetAllPublicPorts(inst.ID)
-	if len(existing) > 0 || len(inst.ExposePorts) == 0 {
+	snap := inst.Snapshot()
+	existing := s.router.GetAllPublicPorts(snap.ID)
+	if len(existing) > 0 || len(snap.ExposePorts) == 0 {
 		return
 	}
 	var savedPorts map[int]int
 	if s.registry != nil {
-		ri, err := s.registry.GetInstance(inst.ID)
+		ri, err := s.registry.GetInstance(snap.ID)
 		switch {
 		case err != nil:
-			log.Printf("instance %s: read saved public ports: %v", inst.ID, err)
+			log.Printf("instance %s: read saved public ports: %v", snap.ID, err)
 		case ri != nil:
 			savedPorts = ri.PublicPorts
 		}
 	}
-	for _, ep := range inst.ExposePorts {
+	for _, ep := range snap.ExposePorts {
 		requestedPort := savedPorts[ep.GuestPort]
 		if requestedPort == 0 {
-			log.Printf("instance %s: no saved public port for guest :%d (saved=%v), allocating a random one", inst.ID, ep.GuestPort, savedPorts)
+			log.Printf("instance %s: no saved public port for guest :%d (saved=%v), allocating a random one", snap.ID, ep.GuestPort, savedPorts)
 		}
-		if _, err := s.router.AllocatePort(inst.ID, ep.GuestPort, requestedPort, ep.Protocol); err != nil {
-			log.Printf("instance %s: restore public port :%d for guest :%d: %v", inst.ID, requestedPort, ep.GuestPort, err)
+		if _, err := s.router.AllocatePort(snap.ID, ep.GuestPort, requestedPort, ep.Protocol); err != nil {
+			log.Printf("instance %s: restore public port :%d for guest :%d: %v", snap.ID, requestedPort, ep.GuestPort, err)
 			if requestedPort > 0 {
-				s.router.AllocatePort(inst.ID, ep.GuestPort, 0, ep.Protocol)
+				s.router.AllocatePort(snap.ID, ep.GuestPort, 0, ep.Protocol)
 			}
 		}
 	}
@@ -861,14 +937,15 @@ func (s *Server) handleUpdateInstanceSecrets(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Replace (not merge) the instance's SecretKeys
-	inst.SecretKeys = req.Secrets
+	inst.SetSecretKeys(req.Secrets)
 	s.lifecycle.SaveToRegistry(inst)
+	snap := inst.Snapshot()
 
 	resp := map[string]interface{}{
-		"secret_keys": inst.SecretKeys,
+		"secret_keys": snap.SecretKeys,
 	}
 	// Signal if a restart is needed to pick up the changes
-	if inst.State == lifecycle.StateRunning || inst.State == lifecycle.StatePaused {
+	if snap.State == lifecycle.StateRunning || snap.State == lifecycle.StatePaused {
 		resp["restart_required"] = true
 	}
 
@@ -918,12 +995,13 @@ func (s *Server) handleDeleteInstance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "instance not found")
 		return
 	}
-	resolvedID := inst.ID
+	snap := inst.Snapshot()
+	resolvedID := snap.ID
 
 	// Check if auto-workspace should be cleaned up before deleting the instance.
 	var autoWsPath string
-	if inst.AutoWorkspace && inst.WorkspacePath != "" {
-		autoWsPath = inst.WorkspacePath
+	if snap.AutoWorkspace && snap.WorkspacePath != "" {
+		autoWsPath = snap.WorkspacePath
 	}
 
 	// Free public port listeners before deleting instance
@@ -972,17 +1050,18 @@ func (s *Server) handlePruneInstances(w http.ResponseWriter, r *http.Request) {
 	var pruned []string
 
 	for _, inst := range instances {
-		if inst.State == lifecycle.StateStopped && !inst.StoppedAt.IsZero() && inst.StoppedAt.Before(cutoff) {
+		snap := inst.Snapshot()
+		if snap.State == lifecycle.StateStopped && !snap.StoppedAt.IsZero() && snap.StoppedAt.Before(cutoff) {
 			if s.router != nil {
-				s.router.FreeAllPorts(inst.ID)
+				s.router.FreeAllPorts(snap.ID)
 			}
-			if err := s.lifecycle.DeleteInstance(inst.ID); err == nil {
+			if err := s.lifecycle.DeleteInstance(snap.ID); err == nil {
 				if s.registry != nil {
-					s.registry.DeleteInstance(inst.ID)
-					s.registry.DeleteTetherFrames(inst.ID)
-					s.registry.DeleteTetherWatermarks(inst.ID)
+					s.registry.DeleteInstance(snap.ID)
+					s.registry.DeleteTetherFrames(snap.ID)
+					s.registry.DeleteTetherWatermarks(snap.ID)
 				}
-				pruned = append(pruned, inst.ID)
+				pruned = append(pruned, snap.ID)
 			}
 		}
 	}
@@ -1097,7 +1176,7 @@ func parseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
-// Workspace file handlers — read/write files in instance workspaces.
+// Workspace file handlers - read/write files in instance workspaces.
 
 const maxWorkspaceFileSize = 10 << 20 // 10MB
 
@@ -1138,19 +1217,20 @@ func (s *Server) handleWorkspaceTree(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "instance not found")
 		return
 	}
-	if inst.WorkspacePath == "" {
+	snap := inst.Snapshot()
+	if snap.WorkspacePath == "" {
 		writeError(w, http.StatusNotFound, "instance has no workspace")
 		return
 	}
 
-	fullPath := filepath.Join(inst.WorkspacePath, filepath.Clean(relPath))
+	fullPath := filepath.Join(snap.WorkspacePath, filepath.Clean(relPath))
 
 	resolved, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "directory not found")
 		return
 	}
-	wsResolved, _ := filepath.EvalSymlinks(inst.WorkspacePath)
+	wsResolved, _ := filepath.EvalSymlinks(snap.WorkspacePath)
 	if !strings.HasPrefix(resolved, wsResolved) {
 		writeError(w, http.StatusForbidden, "path escapes workspace")
 		return
@@ -1206,12 +1286,13 @@ func (s *Server) handleWorkspaceRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if inst.WorkspacePath == "" {
+	snap := inst.Snapshot()
+	if snap.WorkspacePath == "" {
 		writeError(w, http.StatusNotFound, "instance has no workspace")
 		return
 	}
 
-	fullPath := filepath.Join(inst.WorkspacePath, filepath.Clean(relPath))
+	fullPath := filepath.Join(snap.WorkspacePath, filepath.Clean(relPath))
 
 	// Verify the resolved path is within the workspace (symlink escape check)
 	resolved, err := filepath.EvalSymlinks(filepath.Dir(fullPath))
@@ -1219,7 +1300,7 @@ func (s *Server) handleWorkspaceRead(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "file not found")
 		return
 	}
-	wsResolved, _ := filepath.EvalSymlinks(inst.WorkspacePath)
+	wsResolved, _ := filepath.EvalSymlinks(snap.WorkspacePath)
 	if !strings.HasPrefix(resolved, wsResolved) {
 		writeError(w, http.StatusForbidden, "path escapes workspace")
 		return
@@ -1275,7 +1356,8 @@ func (s *Server) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if inst.WorkspacePath == "" {
+	snap := inst.Snapshot()
+	if snap.WorkspacePath == "" {
 		writeError(w, http.StatusNotFound, "instance has no workspace")
 		return
 	}
@@ -1291,7 +1373,7 @@ func (s *Server) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := filepath.Join(inst.WorkspacePath, filepath.Clean(relPath))
+	fullPath := filepath.Join(snap.WorkspacePath, filepath.Clean(relPath))
 
 	// Verify the resolved parent is within the workspace
 	parentDir := filepath.Dir(fullPath)
@@ -1304,7 +1386,7 @@ func (s *Server) handleWorkspaceWrite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "resolve path failed")
 		return
 	}
-	wsResolved, _ := filepath.EvalSymlinks(inst.WorkspacePath)
+	wsResolved, _ := filepath.EvalSymlinks(snap.WorkspacePath)
 	if !strings.HasPrefix(resolved, wsResolved) {
 		writeError(w, http.StatusForbidden, "path escapes workspace")
 		return
@@ -1331,7 +1413,8 @@ func (s *Server) handleBlobUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "instance not found")
 		return
 	}
-	if inst.WorkspacePath == "" {
+	snap := inst.Snapshot()
+	if snap.WorkspacePath == "" {
 		writeError(w, http.StatusNotFound, "instance has no workspace")
 		return
 	}
@@ -1351,7 +1434,7 @@ func (s *Server) handleBlobUpload(w http.ResponseWriter, r *http.Request) {
 		mediaType = "image/png"
 	}
 
-	store := blob.NewWorkspaceBlobStore(inst.WorkspacePath)
+	store := blob.NewWorkspaceBlobStore(snap.WorkspacePath)
 	key, err := store.Put(data, mediaType)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("blob store: %v", err))
@@ -1365,7 +1448,7 @@ func (s *Server) handleBlobUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Tether handlers — host-guest messaging
+// Tether handlers - host-guest messaging
 
 func (s *Server) handleTetherIngress(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
@@ -1380,7 +1463,7 @@ func (s *Server) handleTetherIngress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !inst.Enabled {
+	if !inst.IsEnabled() {
 		writeError(w, http.StatusConflict, "instance is disabled")
 		return
 	}
@@ -1446,7 +1529,7 @@ func (s *Server) handleTetherStream(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 
-	// Subscribe to live frames only — no history replay.
+	// Subscribe to live frames only - no history replay.
 	// Clients that need history should use the poll endpoint with after_seq=0.
 	ch, unsub := ts.Subscribe(inst.ID)
 	defer unsub()
@@ -1522,7 +1605,7 @@ func (s *Server) handleTetherPoll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// Tether watermark handlers — per-channel read position (high-water mark).
+// Tether watermark handlers - per-channel read position (high-water mark).
 
 func (s *Server) handleGetTetherWatermark(w http.ResponseWriter, r *http.Request) {
 	id := pathParam(r, "id")
@@ -1579,7 +1662,7 @@ func (s *Server) handleSetTetherWatermark(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]int64{"seq": req.Seq})
 }
 
-// Secret handlers — dumb key-value store with encryption.
+// Secret handlers - dumb key-value store with encryption.
 // No scoping, no naming rules, no rotation.
 
 type setSecretRequest struct {

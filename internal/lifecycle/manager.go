@@ -87,7 +87,7 @@ type Instance struct {
 	SecretKeys []string
 
 	// bootEnv is the merged env (secrets + Env) computed at boot time.
-	// Not persisted — recomputed on every start.
+	// Not persisted - recomputed on every start.
 	bootEnv map[string]string
 
 	// Connection tracking
@@ -109,7 +109,7 @@ type Instance struct {
 	ParentID     string           // ID of the parent instance that spawned this one (empty = top-level)
 	Capabilities *CapabilityToken // spawn capabilities (nil = no guest API spawning)
 
-	// Keepalive lease — prevents pause while held, auto-expires after TTL
+	// Keepalive lease - prevents pause while held, auto-expires after TTL
 	leaseHeld   bool
 	leaseExpiry time.Time
 	leaseReason string
@@ -122,14 +122,193 @@ type Instance struct {
 	// Exec completion tracking: execID → channel that receives exit code
 	execWaiters map[string]chan int
 
-	// Crash backoff — prevents rapid restart loops
+	// Crash backoff - prevents rapid restart loops
 	crashCount  int       // consecutive crashes (reset on successful run > 10s)
 	lastCrashAt time.Time // time of last crash
+
+	// Transition synchronization and request coalescing (guarded by inst.mu)
+	pausing      bool
+	resuming     bool
+	reaping      bool
+	lastBootErr  error
+	transitionCh chan struct{}
 
 	// Timestamps
 	CreatedAt time.Time
 	StoppedAt time.Time // zero if never stopped or currently running
 	UpdatedAt time.Time // last state change or significant mutation
+}
+
+// InstanceSnapshot is a point-in-time race-free copy of an Instance's metadata and runtime state.
+type InstanceSnapshot struct {
+	ID                string
+	State             string
+	Enabled           bool
+	Command           []string
+	ExposePorts       []vmm.PortExpose
+	HandleAlias       string
+	ImageRef          string
+	RootfsPath        string
+	WorkspacePath     string
+	AutoWorkspace     bool
+	MemoryMB          int
+	VCPUs             int
+	DiskMB            int
+	Env               map[string]string
+	SecretKeys        []string
+	HarnessVersion    string
+	IdlePolicy        string
+	ParentID          string
+	ActiveConnections int
+	LastActivity      time.Time
+	LeaseHeld         bool
+	LeaseReason       string
+	LeaseExpiry       time.Time
+	CreatedAt         time.Time
+	StoppedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+func (inst *Instance) waitChanLocked() <-chan struct{} {
+	if inst.transitionCh == nil {
+		inst.transitionCh = make(chan struct{})
+	}
+	return inst.transitionCh
+}
+
+func (inst *Instance) broadcastLocked() {
+	if inst.transitionCh != nil {
+		close(inst.transitionCh)
+		inst.transitionCh = nil
+	}
+}
+
+// GetState returns the current lifecycle state under inst.mu.
+func (inst *Instance) GetState() string {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	return inst.State
+}
+
+// IsEnabled returns whether wake-on-connect is allowed under inst.mu.
+func (inst *Instance) IsEnabled() bool {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	return inst.Enabled
+}
+
+// SetSecretKeys replaces SecretKeys atomically under inst.mu.
+func (inst *Instance) SetSecretKeys(keys []string) {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	copied := make([]string, len(keys))
+	copy(copied, keys)
+	inst.SecretKeys = copied
+	inst.UpdatedAt = time.Now()
+}
+
+// RestoreTimestamps restores persisted StoppedAt and UpdatedAt values under inst.mu.
+func (inst *Instance) RestoreTimestamps(stoppedAt, updatedAt time.Time) {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	if !stoppedAt.IsZero() {
+		inst.StoppedAt = stoppedAt
+	}
+	if !updatedAt.IsZero() {
+		inst.UpdatedAt = updatedAt
+	}
+}
+
+// Snapshot returns a race-free copy of the instance's state and configuration.
+func (inst *Instance) Snapshot() InstanceSnapshot {
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+
+	var cmdCopy []string
+	if len(inst.Command) > 0 {
+		cmdCopy = make([]string, len(inst.Command))
+		copy(cmdCopy, inst.Command)
+	}
+	var portsCopy []vmm.PortExpose
+	if len(inst.ExposePorts) > 0 {
+		portsCopy = make([]vmm.PortExpose, len(inst.ExposePorts))
+		copy(portsCopy, inst.ExposePorts)
+	}
+	var envCopy map[string]string
+	if len(inst.Env) > 0 {
+		envCopy = make(map[string]string, len(inst.Env))
+		for k, v := range inst.Env {
+			envCopy[k] = v
+		}
+	}
+	var secretsCopy []string
+	if len(inst.SecretKeys) > 0 {
+		secretsCopy = make([]string, len(inst.SecretKeys))
+		copy(secretsCopy, inst.SecretKeys)
+	}
+
+	return InstanceSnapshot{
+		ID:                inst.ID,
+		State:             inst.State,
+		Enabled:           inst.Enabled,
+		Command:           cmdCopy,
+		ExposePorts:       portsCopy,
+		HandleAlias:       inst.HandleAlias,
+		ImageRef:          inst.ImageRef,
+		RootfsPath:        inst.RootfsPath,
+		WorkspacePath:     inst.WorkspacePath,
+		AutoWorkspace:     inst.AutoWorkspace,
+		MemoryMB:          inst.MemoryMB,
+		VCPUs:             inst.VCPUs,
+		DiskMB:            inst.DiskMB,
+		Env:               envCopy,
+		SecretKeys:        secretsCopy,
+		HarnessVersion:    inst.HarnessVersion,
+		IdlePolicy:        inst.IdlePolicy,
+		ParentID:          inst.ParentID,
+		ActiveConnections: inst.activeConns,
+		LastActivity:      inst.lastActivity,
+		LeaseHeld:         inst.leaseHeld,
+		LeaseReason:       inst.leaseReason,
+		LeaseExpiry:       inst.leaseExpiry,
+		CreatedAt:         inst.CreatedAt,
+		StoppedAt:         inst.StoppedAt,
+		UpdatedAt:         inst.UpdatedAt,
+	}
+}
+
+// InstanceStateCounts summarizes managed instances by lifecycle state.
+type InstanceStateCounts struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Starting int `json:"starting"`
+	Paused   int `json:"paused"`
+	Stopped  int `json:"stopped"`
+	Disabled int `json:"disabled"`
+}
+
+// LifecycleMetrics exposes atomic counters and live gauges for scale-to-zero operations.
+type LifecycleMetrics struct {
+	ColdStarts        uint64 `json:"cold_starts"`
+	BootFailures      uint64 `json:"boot_failures"`
+	WarmResumes       uint64 `json:"warm_resumes"`
+	CoalescedWakes    uint64 `json:"coalesced_wakes"`
+	ReapWakeHandoffs  uint64 `json:"reap_wake_handoffs"`
+	IdlePauses        uint64 `json:"idle_pauses"`
+	AbortedPauses     uint64 `json:"aborted_pauses"`
+	IdleStops         uint64 `json:"idle_stops"`
+	ActiveConnections int    `json:"active_connections"`
+}
+
+type lifecycleCounters struct {
+	coldStarts       uint64
+	bootFailures     uint64
+	warmResumes      uint64
+	coalescedWakes   uint64
+	reapWakeHandoffs uint64
+	idlePauses       uint64
+	abortedPauses    uint64
+	idleStops        uint64
 }
 
 // FirstGuestPort returns the first exposed guest port, or 0 if none.
@@ -180,10 +359,12 @@ type Manager struct {
 	registry    *registry.DB
 	tetherStore *tether.Store
 
+	metrics lifecycleCounters
+
 	// Callbacks
 	onStateChange   func(id, state string)
 	onAllocatePorts func(inst *Instance)                                                     // router port allocation
-	getPublicPorts  func(id string) map[int]int                                              // guestPort → publicPort lookup
+	getPublicPorts  func(id string) map[int]int                                              // guestPort -> publicPort lookup
 	onExposePort    func(id string, guestPort, publicPort int, protocol string) (int, error) // runtime expose
 	onUnexposePort  func(id string, guestPort int)                                           // runtime unexpose
 	onPreBoot       func(inst *Instance)                                                     // resolve secrets before boot
@@ -201,6 +382,56 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 	}
 }
 
+// InstanceCounts returns a race-free breakdown of instances by state.
+func (m *Manager) InstanceCounts() InstanceStateCounts {
+	list := m.ListInstances()
+	counts := InstanceStateCounts{Total: len(list)}
+	for _, inst := range list {
+		inst.mu.Lock()
+		state := inst.State
+		enabled := inst.Enabled
+		inst.mu.Unlock()
+
+		if !enabled {
+			counts.Disabled++
+			continue
+		}
+		switch state {
+		case StateRunning:
+			counts.Running++
+		case StateStarting:
+			counts.Starting++
+		case StatePaused:
+			counts.Paused++
+		default:
+			counts.Stopped++
+		}
+	}
+	return counts
+}
+
+// Metrics returns atomic scale-to-zero lifecycle counters and live connection counts.
+func (m *Manager) Metrics() LifecycleMetrics {
+	list := m.ListInstances()
+	activeConns := 0
+	for _, inst := range list {
+		inst.mu.Lock()
+		activeConns += inst.activeConns
+		inst.mu.Unlock()
+	}
+	return LifecycleMetrics{
+		ColdStarts:        atomic.LoadUint64(&m.metrics.coldStarts),
+		BootFailures:      atomic.LoadUint64(&m.metrics.bootFailures),
+		WarmResumes:       atomic.LoadUint64(&m.metrics.warmResumes),
+		CoalescedWakes:    atomic.LoadUint64(&m.metrics.coalescedWakes),
+		ReapWakeHandoffs:  atomic.LoadUint64(&m.metrics.reapWakeHandoffs),
+		IdlePauses:        atomic.LoadUint64(&m.metrics.idlePauses),
+		AbortedPauses:     atomic.LoadUint64(&m.metrics.abortedPauses),
+		IdleStops:         atomic.LoadUint64(&m.metrics.idleStops),
+		ActiveConnections: activeConns,
+	}
+}
+
 // SetSecretStore sets the secret store for capability token operations.
 func (m *Manager) SetSecretStore(ss *secrets.Store) {
 	m.secretStore = ss
@@ -208,6 +439,7 @@ func (m *Manager) SetSecretStore(ss *secrets.Store) {
 
 // saveToRegistry persists an instance to the registry database.
 func (m *Manager) saveToRegistry(inst *Instance) {
+	inst.mu.Lock()
 	capsJSON := ""
 	if inst.Capabilities != nil {
 		if b, err := json.Marshal(inst.Capabilities); err == nil {
@@ -218,17 +450,32 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 	for i, p := range inst.ExposePorts {
 		portInts[i] = p.GuestPort
 	}
+	var envCopy map[string]string
+	if len(inst.Env) > 0 {
+		envCopy = make(map[string]string, len(inst.Env))
+		for k, v := range inst.Env {
+			envCopy[k] = v
+		}
+	}
+	var secretsCopy []string
+	if len(inst.SecretKeys) > 0 {
+		secretsCopy = make([]string, len(inst.SecretKeys))
+		copy(secretsCopy, inst.SecretKeys)
+	}
+	cmdCopy := make([]string, len(inst.Command))
+	copy(cmdCopy, inst.Command)
+
 	regInst := &registry.Instance{
 		ID:            inst.ID,
 		State:         "stopped",
-		Command:       inst.Command,
+		Command:       cmdCopy,
 		ExposePorts:   portInts,
 		Handle:        inst.HandleAlias,
 		ImageRef:      inst.ImageRef,
 		Workspace:     inst.WorkspacePath,
 		AutoWorkspace: inst.AutoWorkspace,
-		Env:           inst.Env,
-		SecretKeys:    inst.SecretKeys,
+		Env:           envCopy,
+		SecretKeys:    secretsCopy,
 		Enabled:       inst.Enabled,
 		MemoryMB:      inst.MemoryMB,
 		DiskMB:        inst.DiskMB,
@@ -237,6 +484,8 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 		Capabilities:  capsJSON,
 		CreatedAt:     inst.CreatedAt,
 	}
+	inst.mu.Unlock()
+
 	if err := m.registry.SaveInstance(regInst); err != nil {
 		log.Printf("save instance to registry: %v", err)
 	}
@@ -249,7 +498,9 @@ func (m *Manager) SaveToRegistry(inst *Instance) {
 
 // OnStateChange registers a callback for state changes (e.g., to persist to registry).
 func (m *Manager) OnStateChange(fn func(id, state string)) {
+	m.mu.Lock()
 	m.onStateChange = fn
+	m.mu.Unlock()
 }
 
 // OnAllocatePorts registers a callback for router port allocation.
@@ -465,7 +716,7 @@ func (m *Manager) CreateInstance(id string, command []string, exposePorts []vmm.
 }
 
 // EnsureInstance ensures an instance is running. This is the single entry point
-// for the router — it never needs to know the current state.
+// for the router - it never needs to know the current state.
 //
 //   - stopped → boot (cold start, ~1-2s)
 //   - paused → SIGCONT resume (<100ms)
@@ -482,69 +733,163 @@ func (m *Manager) EnsureInstance(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
 	}
+	return m.ensureInstanceLoop(ctx, inst, false)
+}
 
-	inst.mu.Lock()
-	enabled := inst.Enabled
-	state := inst.State
-	inst.mu.Unlock()
+func (m *Manager) ensureInstanceLoop(ctx context.Context, inst *Instance, forceEnable bool) error {
+	coalescedRecorded := false
+	reapHandoffRecorded := false
 
-	if !enabled {
-		return ErrInstanceDisabled
-	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 
-	switch state {
-	case StateRunning:
-		return nil
-	case StatePaused:
-		return m.resumeInstance(inst)
-	case StateStopped:
-		return m.bootInstance(ctx, inst)
-	case StateStarting:
-		return m.waitForRunning(ctx, inst)
-	default:
-		return fmt.Errorf("instance %s in unexpected state: %s", id, state)
+		inst.mu.Lock()
+		if forceEnable {
+			inst.Enabled = true
+			forceEnable = false
+		}
+		if !inst.Enabled {
+			inst.mu.Unlock()
+			return ErrInstanceDisabled
+		}
+
+		// Serialize with any in-flight VMM transition (reaping, pausing, resuming, or cold-starting).
+		if inst.reaping || inst.pausing || inst.resuming || inst.State == StateStarting {
+			if inst.reaping && !reapHandoffRecorded {
+				reapHandoffRecorded = true
+				atomic.AddUint64(&m.metrics.reapWakeHandoffs, 1)
+			} else if !inst.reaping && !coalescedRecorded {
+				coalescedRecorded = true
+				atomic.AddUint64(&m.metrics.coalescedWakes, 1)
+			}
+			wasStartingOrResuming := (inst.State == StateStarting || inst.resuming) && !inst.reaping
+			waitCh := inst.waitChanLocked()
+			inst.mu.Unlock()
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-waitCh:
+			}
+
+			if wasStartingOrResuming {
+				inst.mu.Lock()
+				enabledAfter := inst.Enabled
+				stateAfter := inst.State
+				reapingAfter := inst.reaping
+				pausingAfter := inst.pausing
+				bootErr := inst.lastBootErr
+				inst.mu.Unlock()
+
+				if !enabledAfter {
+					return ErrInstanceDisabled
+				}
+				if stateAfter == StateRunning && !pausingAfter {
+					return nil
+				}
+				if stateAfter == StateStopped && !reapingAfter && bootErr != nil {
+					return fmt.Errorf("instance %s failed to start: %w", inst.ID, bootErr)
+				}
+			}
+			continue
+		}
+
+		switch inst.State {
+		case StateRunning:
+			inst.mu.Unlock()
+			return nil
+		case StatePaused:
+			inst.resuming = true
+			inst.lastBootErr = nil
+			if inst.stopTimer != nil {
+				inst.stopTimer.Stop()
+				inst.stopTimer = nil
+			}
+			handle := inst.Handle
+			inst.mu.Unlock()
+			return m.finishResume(inst, handle)
+		case StateStopped:
+			return m.bootInstanceLocked(ctx, inst)
+		default:
+			st := inst.State
+			inst.mu.Unlock()
+			return fmt.Errorf("instance %s in unexpected state: %s", inst.ID, st)
+		}
 	}
 }
 
 func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 	inst.mu.Lock()
-	if inst.State != StateStopped {
+	if inst.State != StateStopped || inst.reaping || inst.pausing || inst.resuming {
 		inst.mu.Unlock()
-		// Another goroutine is already booting — wait for it to finish.
-		return m.waitForRunning(ctx, inst)
+		return m.ensureInstanceLoop(ctx, inst, false)
 	}
+	return m.bootInstanceLocked(ctx, inst)
+}
 
+// bootInstanceLocked starts a cold boot. Caller must hold inst.mu and verify
+// inst.State == StateStopped with no in-flight transition; inst.mu is unlocked before returning.
+func (m *Manager) bootInstanceLocked(ctx context.Context, inst *Instance) error {
 	// Crash backoff: if the instance crashed recently, delay or refuse boot.
 	// Max 5 consecutive crashes within a 2-minute window. Resets after 2 minutes.
 	if inst.crashCount > 0 && !inst.lastCrashAt.IsZero() {
 		if time.Since(inst.lastCrashAt) > 2*time.Minute {
-			// Window expired — reset
 			inst.crashCount = 0
 		} else if inst.crashCount >= 5 {
-			inst.mu.Unlock()
-			return fmt.Errorf("instance %s crash loop (crashed %d times, last at %s)",
+			err := fmt.Errorf("instance %s crash loop (crashed %d times, last at %s)",
 				inst.ID, inst.crashCount, inst.lastCrashAt.Format(time.RFC3339))
+			inst.lastBootErr = err
+			inst.broadcastLocked()
+			inst.mu.Unlock()
+			atomic.AddUint64(&m.metrics.bootFailures, 1)
+			return err
 		}
 	}
 
+	now := time.Now()
 	inst.State = StateStarting
-	inst.StoppedAt = time.Time{} // clear
+	inst.StoppedAt = time.Time{}
+	inst.UpdatedAt = now
+	inst.lastBootErr = nil
+	imageRef := inst.ImageRef
+	rootfsPath := inst.RootfsPath
+	diskMB := inst.DiskMB
+	instMemMB := inst.MemoryMB
+	instVCPUs := inst.VCPUs
+	wsPath := inst.WorkspacePath
+	exposePortsSnapshot := make([]vmm.PortExpose, len(inst.ExposePorts))
+	copy(exposePortsSnapshot, inst.ExposePorts)
+	inst.broadcastLocked()
 	inst.mu.Unlock()
 	m.notifyStateChange(inst.ID, StateStarting)
 
+	failBoot := func(err error) error {
+		atomic.AddUint64(&m.metrics.bootFailures, 1)
+		stoppedNow := time.Now()
+		inst.mu.Lock()
+		inst.State = StateStopped
+		inst.StoppedAt = stoppedNow
+		inst.UpdatedAt = stoppedNow
+		inst.lastBootErr = err
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		m.notifyStateChange(inst.ID, StateStopped)
+		return err
+	}
+
 	// If image ref is set but no rootfs yet, prepare it
-	if inst.ImageRef != "" && inst.RootfsPath == "" {
-		log.Printf("instance %s: preparing image rootfs for %s", inst.ID, inst.ImageRef)
+	if imageRef != "" && rootfsPath == "" {
+		log.Printf("instance %s: preparing image rootfs for %s", inst.ID, imageRef)
 		rootfs, err := m.prepareImageRootfs(ctx, inst)
 		if err != nil {
-			inst.mu.Lock()
-			inst.State = StateStopped
-			inst.StoppedAt = time.Now()
-			inst.mu.Unlock()
-			m.notifyStateChange(inst.ID, StateStopped)
-			return fmt.Errorf("prepare image rootfs: %w", err)
+			return failBoot(fmt.Errorf("prepare image rootfs: %w", err))
 		}
+		inst.mu.Lock()
 		inst.RootfsPath = rootfs
+		inst.mu.Unlock()
+		rootfsPath = rootfs
 	}
 
 	// Resolve secrets after image env merge so bootEnv includes image defaults
@@ -554,40 +899,30 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 
 	log.Printf("instance %s: rootfs ready, starting VM", inst.ID)
 
-	rootfsPath := inst.RootfsPath
-
 	// If the backend needs a block image and we have a directory, convert it.
-	// Reuse existing ext4 image if present — preserves in-VM changes (installed
-	// packages, /etc/local.d/app.start, etc.) across cold boots.
+	// Reuse existing ext4 image if present to preserve in-VM changes across cold boots.
 	needsBlock := m.vmm.Capabilities().RootFSType == vmm.RootFSBlockImage
 	if needsBlock {
 		ext4Path := rootfsPath + ".ext4"
 		if _, err := os.Stat(ext4Path); err == nil {
-			// Existing ext4 image — reuse it (preserves in-VM state)
 			rootfsPath = ext4Path
 		} else if info, err := os.Stat(rootfsPath); err == nil && info.IsDir() {
-			// First boot — convert directory to ext4
 			log.Printf("instance %s: converting directory rootfs to ext4: %s", inst.ID, rootfsPath)
-			var err error
-			rootfsPath, err = m.buildRootDisk(rootfsPath, inst.DiskMB)
-			if err != nil {
-				inst.mu.Lock()
-				inst.State = StateStopped
-				inst.StoppedAt = time.Now()
-				inst.mu.Unlock()
-				m.notifyStateChange(inst.ID, StateStopped)
-				return fmt.Errorf("convert rootfs to ext4: %w", err)
+			var convErr error
+			rootfsPath, convErr = m.buildRootDisk(rootfsPath, diskMB)
+			if convErr != nil {
+				return failBoot(fmt.Errorf("convert rootfs to ext4: %w", convErr))
 			}
 		}
 	}
 
 	memoryMB := m.cfg.DefaultMemoryMB
-	if inst.MemoryMB > 0 {
-		memoryMB = inst.MemoryMB
+	if instMemMB > 0 {
+		memoryMB = instMemMB
 	}
 	vcpus := m.cfg.DefaultVCPUs
-	if inst.VCPUs > 0 {
-		vcpus = inst.VCPUs
+	if instVCPUs > 0 {
+		vcpus = instVCPUs
 	}
 
 	vmCfg := vmm.VMConfig{
@@ -597,29 +932,19 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		},
 		MemoryMB:      memoryMB,
 		VCPUs:         vcpus,
-		ExposePorts:   inst.ExposePorts,
-		WorkspacePath: inst.WorkspacePath,
+		ExposePorts:   exposePortsSnapshot,
+		WorkspacePath: wsPath,
 	}
 
 	handle, err := m.vmm.CreateVM(vmCfg)
 	if err != nil {
-		inst.mu.Lock()
-		inst.State = StateStopped
-		inst.StoppedAt = time.Now()
-		inst.mu.Unlock()
-		m.notifyStateChange(inst.ID, StateStopped)
-		return fmt.Errorf("create VM: %w", err)
+		return failBoot(fmt.Errorf("create VM: %w", err))
 	}
 
 	ch, err := m.vmm.StartVM(handle)
 	if err != nil {
 		m.vmm.StopVM(handle)
-		inst.mu.Lock()
-		inst.State = StateStopped
-		inst.StoppedAt = time.Now()
-		inst.mu.Unlock()
-		m.notifyStateChange(inst.ID, StateStopped)
-		return fmt.Errorf("start VM: %w", err)
+		return failBoot(fmt.Errorf("start VM: %w", err))
 	}
 
 	endpoints, _ := m.vmm.HostEndpoints(handle)
@@ -658,9 +983,9 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 			if json.Unmarshal(params, &ep) == nil {
 				log.Printf("instance %s: exec %s done (exit_code=%d)", inst.ID, ep.ExecID, ep.ExitCode)
 				inst.mu.Lock()
-				if ch, ok := inst.execWaiters[ep.ExecID]; ok {
-					ch <- ep.ExitCode
-					close(ch)
+				if waiterCh, ok := inst.execWaiters[ep.ExecID]; ok {
+					waiterCh <- ep.ExitCode
+					close(waiterCh)
 					delete(inst.execWaiters, ep.ExecID)
 				}
 				inst.mu.Unlock()
@@ -687,7 +1012,7 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		}
 	})
 
-	// Register guest request handler (for guest API → ovmd calls)
+	// Register guest request handler (for guest API -> ovmd calls)
 	demux.onGuestRequest = func(method string, params json.RawMessage) (interface{}, error) {
 		return m.handleGuestRequest(inst, method, params)
 	}
@@ -696,24 +1021,41 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer rpcCancel()
 
-	rpcParams := map[string]interface{}{
-		"command": inst.Command,
-	}
+	inst.mu.Lock()
+	cmdCopy := make([]string, len(inst.Command))
+	copy(cmdCopy, inst.Command)
+	var bootEnvCopy map[string]string
 	if len(inst.bootEnv) > 0 {
-		rpcParams["env"] = inst.bootEnv
-	}
-	if len(inst.ExposePorts) > 0 {
-		var ports []int
-		for _, ep := range inst.ExposePorts {
-			ports = append(ports, ep.GuestPort)
+		bootEnvCopy = make(map[string]string, len(inst.bootEnv))
+		for k, v := range inst.bootEnv {
+			bootEnvCopy[k] = v
 		}
+	}
+	var ports []int
+	for _, ep := range inst.ExposePorts {
+		ports = append(ports, ep.GuestPort)
+	}
+	var capsCopy *CapabilityToken
+	if inst.Capabilities != nil {
+		cp := *inst.Capabilities
+		capsCopy = &cp
+	}
+	inst.mu.Unlock()
+
+	rpcParams := map[string]interface{}{
+		"command": cmdCopy,
+	}
+	if len(bootEnvCopy) > 0 {
+		rpcParams["env"] = bootEnvCopy
+	}
+	if len(ports) > 0 {
 		rpcParams["expose_ports"] = ports
 	}
 	log.Printf("instance %s: run RPC params: expose_ports=%v", inst.ID, rpcParams["expose_ports"])
 
 	// Inject capability token if this instance has spawn capabilities
-	if inst.Capabilities != nil && m.secretStore != nil {
-		token, err := GenerateToken(m.secretStore, inst.ID, *inst.Capabilities)
+	if capsCopy != nil && m.secretStore != nil {
+		token, err := GenerateToken(m.secretStore, inst.ID, *capsCopy)
 		if err != nil {
 			log.Printf("instance %s: generate capability token: %v", inst.ID, err)
 		} else {
@@ -726,12 +1068,7 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		demux.Stop()
 		ch.Close()
 		m.vmm.StopVM(handle)
-		inst.mu.Lock()
-		inst.State = StateStopped
-		inst.StoppedAt = time.Now()
-		inst.mu.Unlock()
-		m.notifyStateChange(inst.ID, StateStopped)
-		return fmt.Errorf("run RPC: %w", err)
+		return failBoot(fmt.Errorf("run RPC: %w", err))
 	}
 
 	var respObj struct {
@@ -746,29 +1083,41 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		demux.Stop()
 		ch.Close()
 		m.vmm.StopVM(handle)
-		inst.mu.Lock()
-		inst.State = StateStopped
-		inst.StoppedAt = time.Now()
-		inst.mu.Unlock()
-		m.notifyStateChange(inst.ID, StateStopped)
-		return fmt.Errorf("run failed: %s", respObj.Error.Message)
+		return failBoot(fmt.Errorf("run failed: %s", respObj.Error.Message))
 	}
 
-	// Capture harness version from run response
+	// Transition to RUNNING unless concurrently stopped or disabled while booting
+	inst.mu.Lock()
+	if inst.State != StateStarting || !inst.Enabled {
+		disabled := !inst.Enabled
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		demux.Stop()
+		ch.Close()
+		m.vmm.StopVM(handle)
+		if disabled {
+			return ErrInstanceDisabled
+		}
+		return ErrInstanceStopped
+	}
+
 	if respObj.Result.Version != "" {
 		inst.HarnessVersion = respObj.Result.Version
 	}
-
-	// Instance is RUNNING immediately after run RPC succeeds (no readiness wait)
-	inst.mu.Lock()
+	runNow := time.Now()
 	inst.Handle = handle
 	inst.Channel = ch
 	inst.Endpoints = endpoints
 	inst.State = StateRunning
-	inst.lastActivity = time.Now()
+	inst.lastActivity = runNow
+	inst.UpdatedAt = runNow
 	inst.demuxer = demux
 	inst.logCapture = true
+	inst.lastBootErr = nil
+	inst.broadcastLocked()
 	inst.mu.Unlock()
+
+	atomic.AddUint64(&m.metrics.coldStarts, 1)
 	m.notifyStateChange(inst.ID, StateRunning)
 	m.startIdleTimer(inst)
 	log.Printf("instance %s: running (endpoints: %v)", inst.ID, endpoints)
@@ -776,19 +1125,17 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 }
 
 // handleProcessExited handles the processExited notification from the harness.
-// This is the primary process exit path — distinct from idle timeout (stopIdleInstance)
+// This is the primary process exit path, distinct from idle timeout (stopIdleInstance)
 // and explicit user stop (StopInstance).
 func (m *Manager) handleProcessExited(inst *Instance, exitCode int) {
 	inst.mu.Lock()
 	if inst.State != StateRunning && inst.State != StateStarting {
-		// Already stopped/paused by another path — nothing to do.
 		inst.mu.Unlock()
 		return
 	}
 	handle := inst.Handle
 	demux := inst.demuxer
 
-	// Cancel timers
 	if inst.idleTimer != nil {
 		inst.idleTimer.Stop()
 		inst.idleTimer = nil
@@ -803,25 +1150,22 @@ func (m *Manager) handleProcessExited(inst *Instance, exitCode int) {
 	}
 	inst.leaseHeld = false
 
-	// Close exec waiters so handlers unblock
-	for eid, ch := range inst.execWaiters {
-		ch <- -1
-		close(ch)
+	for eid, waiterCh := range inst.execWaiters {
+		waiterCh <- -1
+		close(waiterCh)
 		delete(inst.execWaiters, eid)
 	}
 
-	// Track crash backoff: if process ran < 10s, count as a crash
 	uptime := time.Since(inst.lastActivity)
 	if exitCode != 0 && uptime < 10*time.Second {
 		inst.crashCount++
 		inst.lastCrashAt = time.Now()
 		log.Printf("instance %s: crash #%d (uptime=%v)", inst.ID, inst.crashCount, uptime)
 	} else {
-		inst.crashCount = 0 // clean exit or long-lived process — reset
+		inst.crashCount = 0
 	}
 
-	inst.State = StateStopped
-	inst.StoppedAt = time.Now()
+	inst.reaping = true
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
@@ -833,14 +1177,21 @@ func (m *Manager) handleProcessExited(inst *Instance, exitCode int) {
 	il := m.logStore.GetOrCreate(inst.ID)
 	il.Append("stdout", fmt.Sprintf("process exited (code=%d)", exitCode), "", logstore.SourceSystem)
 
-	m.notifyStateChange(inst.ID, StateStopped)
-
-	// Shutdown demuxer → VM (demuxer.Stop closes the channel)
 	if demux != nil {
 		demux.Stop()
 	}
 	m.vmm.StopVM(handle)
-	// Instance stays in the map with logs — removed only by explicit DELETE.
+
+	now := time.Now()
+	inst.mu.Lock()
+	inst.reaping = false
+	inst.State = StateStopped
+	inst.StoppedAt = now
+	inst.UpdatedAt = now
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+
+	m.notifyStateChange(inst.ID, StateStopped)
 }
 
 func nextRPCID() int64 {
@@ -849,25 +1200,56 @@ func nextRPCID() int64 {
 
 func (m *Manager) resumeInstance(inst *Instance) error {
 	inst.mu.Lock()
+	if inst.resuming || inst.reaping || inst.pausing {
+		inst.mu.Unlock()
+		return m.ensureInstanceLoop(context.Background(), inst, false)
+	}
 	if inst.State != StatePaused {
 		inst.mu.Unlock()
 		return nil
 	}
-	handle := inst.Handle
-	inst.mu.Unlock()
-
-	log.Printf("instance %s: resuming (SIGCONT)", inst.ID)
-	if err := m.vmm.ResumeVM(handle); err != nil {
-		return fmt.Errorf("resume VM: %w", err)
-	}
-
-	inst.mu.Lock()
-	inst.State = StateRunning
-	inst.lastActivity = time.Now()
+	inst.resuming = true
+	inst.lastBootErr = nil
 	if inst.stopTimer != nil {
 		inst.stopTimer.Stop()
 		inst.stopTimer = nil
 	}
+	handle := inst.Handle
+	inst.mu.Unlock()
+
+	return m.finishResume(inst, handle)
+}
+
+func (m *Manager) finishResume(inst *Instance, handle vmm.Handle) error {
+	log.Printf("instance %s: resuming (SIGCONT)", inst.ID)
+	if err := m.vmm.ResumeVM(handle); err != nil {
+		wErr := fmt.Errorf("resume VM: %w", err)
+		inst.mu.Lock()
+		inst.resuming = false
+		inst.lastBootErr = wErr
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		return wErr
+	}
+
+	atomic.AddUint64(&m.metrics.warmResumes, 1)
+	now := time.Now()
+	inst.mu.Lock()
+	inst.resuming = false
+	if !inst.Enabled || inst.State != StatePaused {
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		return nil
+	}
+	inst.State = StateRunning
+	inst.lastActivity = now
+	inst.UpdatedAt = now
+	inst.lastBootErr = nil
+	if inst.stopTimer != nil {
+		inst.stopTimer.Stop()
+		inst.stopTimer = nil
+	}
+	inst.broadcastLocked()
 	inst.mu.Unlock()
 	m.notifyStateChange(inst.ID, StateRunning)
 	m.startIdleTimer(inst)
@@ -875,22 +1257,34 @@ func (m *Manager) resumeInstance(inst *Instance) error {
 }
 
 func (m *Manager) waitForRunning(ctx context.Context, inst *Instance) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
 	for {
+		inst.mu.Lock()
+		if !inst.Enabled {
+			inst.mu.Unlock()
+			return ErrInstanceDisabled
+		}
+		state := inst.State
+		reaping := inst.reaping
+		pausing := inst.pausing
+		bootErr := inst.lastBootErr
+		if state == StateRunning && !pausing {
+			inst.mu.Unlock()
+			return nil
+		}
+		if state == StateStopped && !reaping {
+			inst.mu.Unlock()
+			if bootErr != nil {
+				return fmt.Errorf("instance %s failed to start: %w", inst.ID, bootErr)
+			}
+			return fmt.Errorf("instance %s failed to start", inst.ID)
+		}
+		waitCh := inst.waitChanLocked()
+		inst.mu.Unlock()
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
-			inst.mu.Lock()
-			state := inst.State
-			inst.mu.Unlock()
-			switch state {
-			case StateRunning:
-				return nil
-			case StateStopped:
-				return fmt.Errorf("instance %s failed to start", inst.ID)
-			}
+		case <-waitCh:
 		}
 	}
 }
@@ -910,6 +1304,10 @@ func (m *Manager) ResetActivity(id string) {
 	if inst.idleTimer != nil {
 		inst.idleTimer.Stop()
 		inst.idleTimer = nil
+	}
+	if inst.stopTimer != nil {
+		inst.stopTimer.Stop()
+		inst.stopTimer = nil
 	}
 	inst.mu.Unlock()
 }
@@ -943,6 +1341,11 @@ func (m *Manager) startIdleTimer(inst *Instance) {
 
 	if inst.idleTimer != nil {
 		inst.idleTimer.Stop()
+		inst.idleTimer = nil
+	}
+
+	if inst.State != StateRunning || inst.activeConns > 0 || inst.leaseHeld {
+		return
 	}
 
 	inst.idleTimer = time.AfterFunc(m.cfg.PauseAfterIdle, func() {
@@ -986,6 +1389,7 @@ func (m *Manager) acquireLease(inst *Instance, ttlMs int, reason string) {
 	// Cancel idle timer while lease is held
 	if inst.idleTimer != nil {
 		inst.idleTimer.Stop()
+		inst.idleTimer = nil
 	}
 
 	// Set lease expiry timer
@@ -1028,65 +1432,130 @@ func (m *Manager) releaseLease(inst *Instance) {
 
 func (m *Manager) pauseInstance(inst *Instance) {
 	inst.mu.Lock()
-	if inst.State != StateRunning || inst.activeConns > 0 || inst.leaseHeld {
+	if inst.State != StateRunning || inst.pausing || inst.resuming || inst.reaping || inst.activeConns > 0 || inst.leaseHeld {
 		inst.mu.Unlock()
 		return
 	}
+	inst.pausing = true
 	handle := inst.Handle
 	inst.mu.Unlock()
 
 	log.Printf("instance %s: pausing (idle timeout)", inst.ID)
 	if err := m.vmm.PauseVM(handle); err != nil {
 		log.Printf("instance %s: pause failed: %v", inst.ID, err)
+		inst.mu.Lock()
+		inst.pausing = false
+		inst.broadcastLocked()
+		inst.mu.Unlock()
 		return
 	}
 
 	inst.mu.Lock()
-	inst.State = StatePaused
-	inst.mu.Unlock()
-	m.notifyStateChange(inst.ID, StatePaused)
+	// If Disabled/Stopped while PauseVM was running, mark StatePaused (if still StateRunning)
+	// and broadcast so DisableInstance/StopInstance can resume+stop cleanly without arming stopTimer.
+	if !inst.Enabled || inst.State != StateRunning {
+		inst.pausing = false
+		if inst.State == StateRunning {
+			inst.State = StatePaused
+		}
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		return
+	}
 
-	// Start terminate timer — unless backend has persistent pause (e.g. libkrun/macOS),
-	// where the OS manages memory pressure via swap and stopping is unnecessary.
-	if !m.vmm.Capabilities().PersistentPause {
+	// If an incoming connection, lease, or wake waiter arrived while PauseVM was executing,
+	// immediately resume the VM so active requests never hit a frozen guest.
+	if inst.activeConns > 0 || inst.leaseHeld || inst.transitionCh != nil {
+		inst.pausing = false
+		inst.resuming = true
+		inst.mu.Unlock()
+
+		log.Printf("instance %s: activity arrived during pause, resuming immediately", inst.ID)
+		if rErr := m.vmm.ResumeVM(handle); rErr != nil {
+			log.Printf("instance %s: resume after aborted pause failed: %v", inst.ID, rErr)
+			inst.mu.Lock()
+			inst.resuming = false
+			inst.State = StatePaused
+			inst.UpdatedAt = time.Now()
+			inst.broadcastLocked()
+			inst.mu.Unlock()
+			m.notifyStateChange(inst.ID, StatePaused)
+			return
+		}
+
+		atomic.AddUint64(&m.metrics.abortedPauses, 1)
+		atomic.AddUint64(&m.metrics.warmResumes, 1)
+		now := time.Now()
 		inst.mu.Lock()
+		inst.resuming = false
+		inst.State = StateRunning
+		inst.lastActivity = now
+		inst.UpdatedAt = now
+		inst.broadcastLocked()
+		inst.mu.Unlock()
+		m.startIdleTimer(inst)
+		return
+	}
+
+	inst.pausing = false
+	inst.State = StatePaused
+	inst.UpdatedAt = time.Now()
+	if !m.vmm.Capabilities().PersistentPause {
+		if inst.stopTimer != nil {
+			inst.stopTimer.Stop()
+		}
 		inst.stopTimer = time.AfterFunc(m.cfg.StopAfterIdle, func() {
 			m.stopIdleInstance(inst)
 		})
-		inst.mu.Unlock()
 	}
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+
+	atomic.AddUint64(&m.metrics.idlePauses, 1)
+	m.notifyStateChange(inst.ID, StatePaused)
 }
 
 func (m *Manager) stopIdleInstance(inst *Instance) {
 	inst.mu.Lock()
-	if inst.State != StatePaused {
+	if inst.State != StatePaused || inst.resuming || inst.pausing || inst.reaping || inst.activeConns > 0 || inst.leaseHeld {
 		inst.mu.Unlock()
 		return
+	}
+	inst.reaping = true
+	if inst.stopTimer != nil {
+		inst.stopTimer.Stop()
+		inst.stopTimer = nil
 	}
 	handle := inst.Handle
 	demux := inst.demuxer
 	instID := inst.ID
-	inst.mu.Unlock()
-
-	// Close the control channel — harness sees EOF and shuts down.
-	if demux != nil {
-		demux.Stop()
-	}
-
-	// Update instance state.
-	inst.mu.Lock()
-	inst.State = StateStopped
-	inst.StoppedAt = time.Now()
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
 	inst.logCapture = false
 	inst.mu.Unlock()
 
-	// Stop VM — kills CH, cleans tap/NAT.
+	// Close the control channel and tear down the VMM while inst.reaping == true.
+	// Any concurrent EnsureInstance calls wait on transitionCh until teardown completes
+	// and then perform a clean cold boot with zero VMM/disk races.
+	if demux != nil {
+		demux.Stop()
+	}
+	m.vmm.StopVM(handle)
+
+	now := time.Now()
+	inst.mu.Lock()
+	inst.reaping = false
+	inst.State = StateStopped
+	inst.StoppedAt = now
+	inst.UpdatedAt = now
+	inst.lastBootErr = nil
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+
+	atomic.AddUint64(&m.metrics.idleStops, 1)
 	log.Printf("instance %s: stopped (extended idle)", instID)
 	m.notifyStateChange(instID, StateStopped)
-	m.vmm.StopVM(handle)
 }
 
 // GetEndpoint returns the host endpoint for a guest port on the given instance.
@@ -1148,23 +1617,28 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 		return "", fmt.Errorf("image cache or overlay not configured")
 	}
 
+	inst.mu.Lock()
+	instID := inst.ID
+	imageRef := inst.ImageRef
+	inst.mu.Unlock()
+
 	progress := func(stage, detail string) {
-		m.logStore.GetOrCreate(inst.ID).Append("stderr",
+		m.logStore.GetOrCreate(instID).Append("stderr",
 			fmt.Sprintf("[ovm] image %s: %s", stage, detail), "", logstore.SourceSystem)
 	}
-	cachedDir, _, err := m.imageCache.GetOrPull(ctx, inst.ImageRef, progress)
+	cachedDir, _, err := m.imageCache.GetOrPull(ctx, imageRef, progress)
 	if err != nil {
 		return "", fmt.Errorf("pull image: %w", err)
 	}
 
 	// Merge OCI image ENV into instance env (image defaults, explicit env wins)
 	if imageEnv := image.ReadImageEnv(cachedDir); len(imageEnv) > 0 {
+		inst.mu.Lock()
 		if inst.Env == nil {
 			inst.Env = make(map[string]string)
 		}
 		for k, v := range imageEnv {
 			if k == "PATH" {
-				// Prepend image PATH to existing or default PATH
 				if existing, ok := inst.Env["PATH"]; ok {
 					inst.Env["PATH"] = v + ":" + existing
 				} else {
@@ -1172,15 +1646,15 @@ func (m *Manager) prepareImageRootfs(ctx context.Context, inst *Instance) (strin
 				}
 				continue
 			}
-			// Image env is default — don't override explicit env
 			if _, exists := inst.Env[k]; !exists {
 				inst.Env[k] = v
 			}
 		}
-		log.Printf("instance %s: merged %d image env vars", inst.ID, len(imageEnv))
+		inst.mu.Unlock()
+		log.Printf("instance %s: merged %d image env vars", instID, len(imageEnv))
 	}
 
-	overlayID := inst.ID
+	overlayID := instID
 	overlayDir, err := m.overlay.Create(ctx, cachedDir, overlayID)
 	if err != nil {
 		return "", fmt.Errorf("create overlay: %w", err)
@@ -1265,6 +1739,13 @@ func (m *Manager) StopInstance(id string) error {
 	}
 
 	inst.mu.Lock()
+	for inst.reaping || inst.pausing || inst.resuming {
+		waitCh := inst.waitChanLocked()
+		inst.mu.Unlock()
+		<-waitCh
+		inst.mu.Lock()
+	}
+
 	state := inst.State
 	if state == StateStopped {
 		inst.mu.Unlock()
@@ -1281,6 +1762,11 @@ func (m *Manager) StopInstance(id string) error {
 		inst.stopTimer.Stop()
 		inst.stopTimer = nil
 	}
+	if inst.leaseTimer != nil {
+		inst.leaseTimer.Stop()
+		inst.leaseTimer = nil
+	}
+	inst.leaseHeld = false
 
 	// Close all exec waiters so handlers unblock
 	for eid, ch := range inst.execWaiters {
@@ -1289,20 +1775,29 @@ func (m *Manager) StopInstance(id string) error {
 		delete(inst.execWaiters, eid)
 	}
 
-	inst.State = StateStopped
-	inst.StoppedAt = time.Now()
+	inst.reaping = true
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
 	inst.logCapture = false
 	inst.mu.Unlock()
-	m.notifyStateChange(id, StateStopped)
 
 	if state == StatePaused {
 		m.vmm.ResumeVM(handle)
 	}
 
 	m.shutdownVM(demux, handle)
+
+	now := time.Now()
+	inst.mu.Lock()
+	inst.reaping = false
+	inst.State = StateStopped
+	inst.StoppedAt = now
+	inst.UpdatedAt = now
+	inst.lastBootErr = nil
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+	m.notifyStateChange(id, StateStopped)
 
 	// Cascade stop children (orphan policy: cascade)
 	go m.CascadeStopChildren(id)
@@ -1311,7 +1806,7 @@ func (m *Manager) StopInstance(id string) error {
 }
 
 // StartInstance sets Enabled=true and boots the instance.
-// This is the explicit start path (CLI/API) — distinct from EnsureInstance (auto-wake).
+// This is the explicit start path (CLI/API), distinct from EnsureInstance (auto-wake).
 func (m *Manager) StartInstance(ctx context.Context, id string) error {
 	m.mu.Lock()
 	inst, ok := m.instances[id]
@@ -1319,24 +1814,7 @@ func (m *Manager) StartInstance(ctx context.Context, id string) error {
 	if !ok {
 		return fmt.Errorf("instance %s not found", id)
 	}
-
-	inst.mu.Lock()
-	inst.Enabled = true
-	state := inst.State
-	inst.mu.Unlock()
-
-	switch state {
-	case StateRunning:
-		return nil
-	case StatePaused:
-		return m.resumeInstance(inst)
-	case StateStopped:
-		return m.bootInstance(ctx, inst)
-	case StateStarting:
-		return m.waitForRunning(ctx, inst)
-	default:
-		return fmt.Errorf("instance %s in unexpected state: %s", id, state)
-	}
+	return m.ensureInstanceLoop(ctx, inst, true)
 }
 
 // DisableInstance makes an instance a pure registry object:
@@ -1352,10 +1830,20 @@ func (m *Manager) DisableInstance(id string) error {
 	inst.mu.Lock()
 	// Set disabled first so router/EnsureInstance stops waking immediately
 	inst.Enabled = false
+	inst.broadcastLocked()
+
+	for inst.reaping || inst.pausing || inst.resuming {
+		waitCh := inst.waitChanLocked()
+		inst.mu.Unlock()
+		<-waitCh
+		inst.mu.Lock()
+		inst.Enabled = false
+	}
 
 	state := inst.State
 	if state == StateStopped {
-		// Already stopped — just ensure disabled flag is set
+		inst.UpdatedAt = time.Now()
+		inst.broadcastLocked()
 		inst.mu.Unlock()
 		return nil
 	}
@@ -1372,6 +1860,11 @@ func (m *Manager) DisableInstance(id string) error {
 		inst.stopTimer.Stop()
 		inst.stopTimer = nil
 	}
+	if inst.leaseTimer != nil {
+		inst.leaseTimer.Stop()
+		inst.leaseTimer = nil
+	}
+	inst.leaseHeld = false
 
 	// Close all exec waiters so handlers unblock
 	for eid, ch := range inst.execWaiters {
@@ -1380,15 +1873,12 @@ func (m *Manager) DisableInstance(id string) error {
 		delete(inst.execWaiters, eid)
 	}
 
-	inst.State = StateStopped
-	inst.StoppedAt = time.Now()
+	inst.reaping = true
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
 	inst.logCapture = false
 	inst.mu.Unlock()
-
-	m.notifyStateChange(id, StateStopped)
 
 	if state == StatePaused {
 		m.vmm.ResumeVM(handle)
@@ -1397,7 +1887,21 @@ func (m *Manager) DisableInstance(id string) error {
 	if demux != nil {
 		demux.Stop()
 	}
-	m.vmm.StopVM(handle)
+	if m.vmm != nil {
+		m.vmm.StopVM(handle)
+	}
+
+	now := time.Now()
+	inst.mu.Lock()
+	inst.reaping = false
+	inst.State = StateStopped
+	inst.StoppedAt = now
+	inst.UpdatedAt = now
+	inst.lastBootErr = nil
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+
+	m.notifyStateChange(id, StateStopped)
 
 	// Cascade stop children
 	go m.CascadeStopChildren(id)
@@ -1415,6 +1919,16 @@ func (m *Manager) DeleteInstance(id string) error {
 	}
 
 	inst.mu.Lock()
+	inst.Enabled = false
+	inst.broadcastLocked()
+	for inst.reaping || inst.pausing || inst.resuming {
+		waitCh := inst.waitChanLocked()
+		inst.mu.Unlock()
+		<-waitCh
+		inst.mu.Lock()
+		inst.Enabled = false
+	}
+
 	state := inst.State
 	handle := inst.Handle
 	demux := inst.demuxer
@@ -1427,6 +1941,11 @@ func (m *Manager) DeleteInstance(id string) error {
 		inst.stopTimer.Stop()
 		inst.stopTimer = nil
 	}
+	if inst.leaseTimer != nil {
+		inst.leaseTimer.Stop()
+		inst.leaseTimer = nil
+	}
+	inst.leaseHeld = false
 
 	for eid, ch := range inst.execWaiters {
 		ch <- -1
@@ -1434,14 +1953,12 @@ func (m *Manager) DeleteInstance(id string) error {
 		delete(inst.execWaiters, eid)
 	}
 
-	inst.State = StateStopped
-	inst.StoppedAt = time.Now()
+	inst.reaping = state != StateStopped
 	inst.Channel = nil
 	inst.Endpoints = nil
 	inst.demuxer = nil
 	inst.logCapture = false
 	inst.mu.Unlock()
-	m.notifyStateChange(id, StateStopped)
 
 	if state == StatePaused {
 		m.vmm.ResumeVM(handle)
@@ -1450,6 +1967,16 @@ func (m *Manager) DeleteInstance(id string) error {
 	if state != StateStopped {
 		m.shutdownVM(demux, handle)
 	}
+
+	now := time.Now()
+	inst.mu.Lock()
+	inst.reaping = false
+	inst.State = StateStopped
+	inst.StoppedAt = now
+	inst.UpdatedAt = now
+	inst.broadcastLocked()
+	inst.mu.Unlock()
+	m.notifyStateChange(id, StateStopped)
 
 	m.mu.Lock()
 	delete(m.instances, id)
@@ -1546,21 +2073,20 @@ func (m *Manager) ExecInstance(ctx context.Context, id string, command []string,
 	execID := fmt.Sprintf("exec-%d", time.Now().UnixNano())
 	startedAt := time.Now()
 
-	// Register done channel before sending RPC to avoid race
+	// Register done channel and snapshot bootEnv before sending RPC to avoid data races
 	doneCh := make(chan int, 1)
+	mergedEnv := make(map[string]string)
 	inst.mu.Lock()
 	if inst.execWaiters == nil {
 		inst.execWaiters = make(map[string]chan int)
 	}
 	inst.execWaiters[execID] = doneCh
-	inst.mu.Unlock()
-
-	// Merge instance boot env (resolved secrets + image env + explicit env) with caller's exec env.
-	// Caller env wins over instance env.
-	mergedEnv := make(map[string]string)
 	for k, v := range inst.bootEnv {
 		mergedEnv[k] = v
 	}
+	inst.mu.Unlock()
+
+	// Merge caller's exec env on top (caller env wins over instance env).
 	for k, v := range env {
 		mergedEnv[k] = v
 	}
@@ -1658,7 +2184,7 @@ func (m *Manager) ExposePort(id string, guestPort, publicPort int, protocol stri
 	for _, ep := range inst.ExposePorts {
 		if ep.GuestPort == guestPort {
 			inst.mu.Unlock()
-			// Already exposed — return existing public port (idempotent)
+			// Already exposed - return existing public port (idempotent)
 			if m.getPublicPorts != nil {
 				ports := m.getPublicPorts(id)
 				if pp, ok := ports[guestPort]; ok {
@@ -1682,7 +2208,7 @@ func (m *Manager) ExposePort(id string, guestPort, publicPort int, protocol stri
 			DynamicExposePort(vmm.Handle, int) (int, error)
 		})
 		if !ok {
-			// Backend doesn't support runtime expose — rollback
+			// Backend doesn't support runtime expose - rollback
 			inst.mu.Lock()
 			for i, ep := range inst.ExposePorts {
 				if ep.GuestPort == guestPort {
@@ -1833,14 +2359,19 @@ func (m *Manager) UnexposePort(id string, guestPort int) error {
 }
 
 func (m *Manager) notifyStateChange(id, state string) {
-	// Touch UpdatedAt on every state transition
+	// Touch UpdatedAt under inst.mu on every state transition
 	m.mu.Lock()
-	if inst, ok := m.instances[id]; ok {
-		inst.UpdatedAt = time.Now()
-	}
+	inst := m.instances[id]
+	fn := m.onStateChange
 	m.mu.Unlock()
 
-	if m.onStateChange != nil {
-		m.onStateChange(id, state)
+	if inst != nil {
+		inst.mu.Lock()
+		inst.UpdatedAt = time.Now()
+		inst.mu.Unlock()
+	}
+
+	if fn != nil {
+		fn(id, state)
 	}
 }

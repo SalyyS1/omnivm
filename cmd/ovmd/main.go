@@ -1,4 +1,4 @@
-// ovmd is the OmniVM daemon — the local control plane for microVM management.
+// ovmd is the OmniVM daemon, the local control plane for microVM management.
 //
 // It listens on a unix socket and provides an HTTP API for instance management,
 // routing, and secret storage.
@@ -49,6 +49,9 @@ func main() {
 	cfg.ResolveNetworkBackend()
 	cfg.ResolveBinaries()
 	cfg.ResolveDNS()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
 	log.Printf("guest DNS server: %s", cfg.DNSServer)
 	log.Printf("network backend: %s", cfg.NetworkBackend)
 
@@ -134,7 +137,7 @@ func main() {
 		log.Fatalf("start router: %v", err)
 	}
 
-	// Public port lookup — used by guest API responses
+	// Public port lookup used by guest API responses
 	lm.SetPublicPortsLookup(func(id string) map[int]int {
 		ports := make(map[int]int)
 		for _, ep := range rtr.GetAllPublicPorts(id) {
@@ -153,34 +156,35 @@ func main() {
 		reg.UpdatePublicPorts(id, ports)
 	}
 
-	// Router port allocation — called from CreateInstance for every new instance.
+	// Router port allocation called from CreateInstance for every new instance.
 	// Checks the registry for a persisted port mapping; uses it if available,
 	// otherwise allocates a random port. This handles both fresh creates and
 	// restores from the registry in a single path.
 	lm.OnAllocatePorts(func(inst *lifecycle.Instance) {
+		snap := inst.Snapshot()
 		// Look up persisted port mapping (nil for new instances)
 		var persisted map[int]int
-		if ri, err := reg.GetInstance(inst.ID); err == nil && ri != nil {
+		if ri, err := reg.GetInstance(snap.ID); err == nil && ri != nil {
 			persisted = ri.PublicPorts
 		}
-		for _, ep := range inst.ExposePorts {
+		for _, ep := range snap.ExposePorts {
 			requestedPort := 0
 			if persisted != nil {
 				requestedPort = persisted[ep.GuestPort]
 			}
-			if _, err := rtr.AllocatePort(inst.ID, ep.GuestPort, requestedPort, ep.Protocol); err != nil {
+			if _, err := rtr.AllocatePort(snap.ID, ep.GuestPort, requestedPort, ep.Protocol); err != nil {
 				if requestedPort > 0 {
-					log.Printf("restore port :%d for %s failed, allocating random: %v", requestedPort, inst.ID, err)
-					rtr.AllocatePort(inst.ID, ep.GuestPort, 0, ep.Protocol)
+					log.Printf("restore port :%d for %s failed, allocating random: %v", requestedPort, snap.ID, err)
+					rtr.AllocatePort(snap.ID, ep.GuestPort, 0, ep.Protocol)
 				} else {
-					log.Printf("allocate port for %s guest:%d: %v", inst.ID, ep.GuestPort, err)
+					log.Printf("allocate port for %s guest:%d: %v", snap.ID, ep.GuestPort, err)
 				}
 			}
 		}
-		persistPublicPorts(inst.ID)
+		persistPublicPorts(snap.ID)
 	})
 
-	// Runtime port expose/unexpose — called from ExposePort/UnexposePort
+	// Runtime port expose/unexpose called from ExposePort/UnexposePort
 	lm.OnExposePort(func(id string, guestPort, publicPort int, protocol string) (int, error) {
 		port, err := rtr.AllocatePort(id, guestPort, publicPort, protocol)
 		if err == nil {
@@ -196,13 +200,14 @@ func main() {
 	// Pre-boot: resolve secret keys into bootEnv before each instance starts.
 	// This ensures rotated or newly-added secrets are picked up on every boot.
 	lm.OnPreBoot(func(inst *lifecycle.Instance) {
+		snap := inst.Snapshot()
 		env := make(map[string]string)
-		if len(inst.SecretKeys) > 0 {
-			injectAll := len(inst.SecretKeys) == 1 && inst.SecretKeys[0] == "*"
+		if len(snap.SecretKeys) > 0 {
+			injectAll := len(snap.SecretKeys) == 1 && snap.SecretKeys[0] == "*"
 			var allowlist map[string]bool
 			if !injectAll {
-				allowlist = make(map[string]bool, len(inst.SecretKeys))
-				for _, k := range inst.SecretKeys {
+				allowlist = make(map[string]bool, len(snap.SecretKeys))
+				for _, k := range snap.SecretKeys {
 					allowlist[k] = true
 				}
 			}
@@ -217,13 +222,13 @@ func main() {
 			}
 		}
 		// Explicit env overrides secrets
-		for k, v := range inst.Env {
+		for k, v := range snap.Env {
 			env[k] = v
 		}
 		inst.SetBootEnv(env)
 	})
 
-	// Restore instances from registry (they all come back as stopped — VMs are gone)
+	// Restore instances from registry (they all come back as stopped; VMs are gone)
 	if instances, err := reg.ListInstances(); err == nil && len(instances) > 0 {
 		restored := 0
 		for _, ri := range instances {
@@ -274,12 +279,7 @@ func main() {
 			inst := lm.CreateInstance(ri.ID, ri.Command, exposePorts, opts...)
 
 			// Restore timestamps from registry
-			if !ri.StoppedAt.IsZero() {
-				inst.StoppedAt = ri.StoppedAt
-			}
-			if !ri.UpdatedAt.IsZero() {
-				inst.UpdatedAt = ri.UpdatedAt
-			}
+			inst.RestoreTimestamps(ri.StoppedAt, ri.UpdatedAt)
 
 			// Port allocation is handled by OnAllocatePorts (triggered by
 			// CreateInstance above) which reads persisted ports from the registry.
@@ -357,5 +357,5 @@ func chownToInvokingUser(cfg *config.Config) {
 		os.Chown(path, uid, gid)
 		return nil
 	})
-	log.Printf("chown %s → uid=%d gid=%d", ovmDir, uid, gid)
+	log.Printf("chown %s -> uid=%d gid=%d", ovmDir, uid, gid)
 }

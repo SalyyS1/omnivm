@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 520" width="920" height="520" role="img" aria-label="OmniVM Architecture Diagram">
+  <defs>
+    <style>
+      .bg { fill: #0d1117; }
+      .panel { fill: #161b22; stroke: #30363d; stroke-width: 1.5; rx: 8; }
+      .panel-accent { fill: #111927; stroke: #388bfd; stroke-width: 1.5; rx: 8; }
+      .panel-vm { fill: #121d18; stroke: #2ea043; stroke-width: 1.5; rx: 8; }
+      .box { fill: #0d1117; stroke: #30363d; stroke-width: 1.2; rx: 6; }
+      .box-blue { fill: #0c2d6b; stroke: #58a6ff; stroke-width: 1.2; rx: 6; }
+      .box-green { fill: #0f2d1e; stroke: #3fb950; stroke-width: 1.2; rx: 6; }
+      .box-amber { fill: #2b2111; stroke: #d29922; stroke-width: 1.2; rx: 6; }
+      .title { fill: #f0f6fc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 700; }
+      .subtitle { fill: #8b949e; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 11px; }
+      .label { fill: #e6edf3; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11.5px; font-weight: 600; }
+      .detail { fill: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 10px; }
+      .state-lbl { fill: #f0f6fc; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; font-weight: 700; }
+      .arrow { stroke: #58a6ff; stroke-width: 1.6; fill: none; marker-end: url(#arrow-blue); }
+      .arrow-green { stroke: #3fb950; stroke-width: 1.6; fill: none; marker-end: url(#arrow-green); }
+      .arrow-muted { stroke: #8b949e; stroke-width: 1.4; stroke-dasharray: 4 3; fill: none; marker-end: url(#arrow-gray); }
+    </style>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="920" height="520" rx="10"/>
+
+  <!-- Header -->
+  <text class="title" x="24" y="30">OmniVM Host Control Plane and Hardware-Isolated MicroVM Architecture</text>
+  <text class="subtitle" x="24" y="47">Linux + KVM + Cloud Hypervisor | Scale-to-zero request coalescing, virtio-vsock control plane, and OCI rootfs</text>
+
+  <!-- Column 1: Clients & Host Ingress -->
+  <rect class="panel" x="20" y="64" width="245" height="330"/>
+  <text class="title" x="36" y="88">Clients &amp; Host Ingress</text>
+  <text class="subtitle" x="36" y="104">Zero-drop wake-on-connect</text>
+
+  <rect class="box" x="36" y="118" width="213" height="54"/>
+  <text class="label" x="48" y="138">ovm CLI / ovm-mcp</text>
+  <text class="detail" x="48" y="154">~/.omnivm/ovmd.sock (HTTP/JSON)</text>
+  <text class="detail" x="48" y="166">/v1/instances, /v1/status, /v1/metrics</text>
+
+  <rect class="box-blue" x="36" y="186" width="213" height="62"/>
+  <text class="label" x="48" y="206">HTTP/WS Router (:8099)</text>
+  <text class="detail" x="48" y="222">X-OmniVM-Instance handle routing</text>
+  <text class="detail" x="48" y="236">Reverse proxy + WS hijack relay</text>
+
+  <rect class="box-blue" x="36" y="262" width="213" height="62"/>
+  <text class="label" x="48" y="282">Stable L4 Port Proxies</text>
+  <text class="detail" x="48" y="298">Persistent host ports across stop</text>
+  <text class="detail" x="48" y="312">MSG_PEEK + Vsock readiness probes</text>
+
+  <rect class="box" x="36" y="336" width="213" height="44"/>
+  <text class="label" x="48" y="355">Tether Frame Stream</text>
+  <text class="detail" x="48" y="369">NDJSON host-guest agent messaging</text>
+
+  <!-- Column 2: ovmd Control Plane -->
+  <rect class="panel-accent" x="305" y="64" width="275" height="330"/>
+  <text class="title" x="321" y="88">ovmd Daemon (Host)</text>
+  <text class="subtitle" x="321" y="104">Single-flight lifecycle &amp; persistence</text>
+
+  <rect class="box" x="321" y="118" width="243" height="64"/>
+  <text class="label" x="333" y="138">Control API &amp; Telemetry</text>
+  <text class="detail" x="333" y="154">Config validator + Unix REST mux</text>
+  <text class="detail" x="333" y="168">Atomic wake/reap/probe counters</text>
+
+  <rect class="box-amber" x="321" y="196" width="243" height="86"/>
+  <text class="label" x="333" y="216">Lifecycle Manager</text>
+  <text class="detail" x="333" y="232">- Transition barrier (transitionCh)</text>
+  <text class="detail" x="333" y="246">- Concurrent wake coalescing</text>
+  <text class="detail" x="333" y="260">- Mid-pause abort &amp; reap handoff</text>
+  <text class="detail" x="333" y="274">- Idle timers + keepalive leases</text>
+
+  <rect class="box" x="321" y="296" width="243" height="84"/>
+  <text class="label" x="333" y="316">Storage, OCI &amp; Secrets</text>
+  <text class="detail" x="333" y="332">- SQLite state &amp; port registry</text>
+  <text class="detail" x="333" y="346">- AES-256-GCM secret allowlists</text>
+  <text class="detail" x="333" y="360">- OCI layer cache -&gt; ext4 rootfs</text>
+
+  <!-- Column 3: Cloud Hypervisor + KVM Guest MicroVM -->
+  <rect class="panel-vm" x="620" y="64" width="280" height="330"/>
+  <text class="title" x="636" y="88">KVM MicroVM Boundary</text>
+  <text class="subtitle" x="636" y="104">Cloud Hypervisor per-instance VM</text>
+
+  <rect class="box-green" x="636" y="118" width="248" height="54"/>
+  <text class="label" x="648" y="138">Dedicated Linux Kernel</text>
+  <text class="detail" x="648" y="154">vmlinux (virtio-vsock, virtiofs, net)</text>
+  <text class="detail" x="648" y="166">Hardware virtualization (/dev/kvm)</text>
+
+  <rect class="box-green" x="636" y="186" width="248" height="72"/>
+  <text class="label" x="648" y="206">ovm-harness (Guest PID 1)</text>
+  <text class="detail" x="648" y="222">JSON-RPC 2.0 over vsock (CID 2)</text>
+  <text class="detail" x="648" y="236">Spawns workload + streams logs</text>
+  <text class="detail" x="648" y="250">Serves guest API + ovm-mcp-guest</text>
+
+  <rect class="box" x="636" y="272" width="248" height="52"/>
+  <text class="label" x="648" y="292">OCI Rootfs + /workspace</text>
+  <text class="detail" x="648" y="308">Isolated ext4 block disk overlay</text>
+  <text class="detail" x="648" y="320">Host workspace via virtiofsd</text>
+
+  <rect class="box" x="636" y="336" width="248" height="44"/>
+  <text class="label" x="648" y="355">/30 TAP Network Interface</text>
+  <text class="detail" x="648" y="369">Point-to-point L3 link to host</text>
+
+  <!-- Inter-column arrows -->
+  <path class="arrow" d="M 249 145 L 319 145"/>
+  <path class="arrow" d="M 249 217 L 319 232"/>
+  <path class="arrow" d="M 249 293 L 319 252"/>
+  <path class="arrow-green" d="M 564 222 L 634 222"/>
+  <path class="arrow-muted" d="M 564 336 L 634 298"/>
+  <path class="arrow" d="M 249 306 C 430 408, 520 408, 634 358"/>
+
+  <!-- Bottom Scale-to-Zero State Machine Bar -->
+  <rect class="panel" x="20" y="410" width="880" height="92"/>
+  <text class="title" x="36" y="432">Scale-to-Zero Instance State Machine</text>
+  <text class="subtitle" x="335" y="432">Deterministic transitions under concurrent wake, pause, and idle reap</text>
+
+  <rect class="box" x="48" y="446" width="145" height="42"/>
+  <text class="state-lbl" x="92" y="466">STOPPED</text>
+  <text class="detail" x="66" y="480">0 MB RAM | ports live</text>
+
+  <rect class="box-blue" x="268" y="446" width="155" height="42"/>
+  <text class="state-lbl" x="313" y="466">STARTING</text>
+  <text class="detail" x="282" y="480">coalesces concurrent wakes</text>
+
+  <rect class="box-green" x="498" y="446" width="155" height="42"/>
+  <text class="state-lbl" x="546" y="466">RUNNING</text>
+  <text class="detail" x="515" y="480">active conns &amp; leases</text>
+
+  <rect class="box-amber" x="728" y="446" width="145" height="42"/>
+  <text class="state-lbl" x="776" y="466">PAUSED</text>
+  <text class="detail" x="742" y="480">vCPUs frozen | fast wake</text>
+
+  <path class="arrow" d="M 193 467 L 266 467"/>
+  <text class="detail" x="203" y="460">wake / start</text>
+
+  <path class="arrow-green" d="M 423 467 L 496 467"/>
+  <text class="detail" x="435" y="460">harness RPC</text>
+
+  <path class="arrow" d="M 653 459 L 726 459"/>
+  <text class="detail" x="664" y="453">idle timer</text>
+
+  <path class="arrow-green" d="M 726 476 L 653 476"/>
+  <text class="detail" x="662" y="492">warm resume</text>
+
+  <path class="arrow-muted" d="M 800 446 C 800 434, 120 434, 120 446"/>
+</svg>

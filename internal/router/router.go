@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,6 +33,15 @@ type PublicEndpoint struct {
 	GuestPort  int
 	PublicPort int
 	Protocol   string
+}
+
+// RouterMetrics exposes ingress traffic and readiness-probe counters.
+type RouterMetrics struct {
+	ActivePortProxies int    `json:"active_port_proxies"`
+	HTTPRequests      uint64 `json:"http_requests"`
+	TCPConnections    uint64 `json:"tcp_connections"`
+	ProbeRetries      uint64 `json:"probe_retries"`
+	BackendErrors     uint64 `json:"backend_errors"`
 }
 
 // portProxy represents a single per-port TCP listener owned by the router.
@@ -49,8 +59,14 @@ type Router struct {
 	lm          *lifecycle.Manager
 	addr        string
 	server      *http.Server
+	probeCfg    ProbeConfig
 	mu          sync.Mutex
-	portProxies map[string][]*portProxy // instanceID → proxies
+	portProxies map[string][]*portProxy // instanceID -> proxies
+
+	httpRequests   uint64
+	tcpConnections uint64
+	probeRetries   uint64
+	backendErrors  uint64
 }
 
 // New creates a new router.
@@ -58,6 +74,7 @@ func New(lm *lifecycle.Manager, addr string) *Router {
 	r := &Router{
 		lm:          lm,
 		addr:        addr,
+		probeCfg:    DefaultProbeConfig(),
 		portProxies: make(map[string][]*portProxy),
 	}
 	r.server = &http.Server{
@@ -67,14 +84,41 @@ func New(lm *lifecycle.Manager, addr string) *Router {
 	return r
 }
 
+// Metrics returns atomic ingress and readiness-probe telemetry.
+func (r *Router) Metrics() RouterMetrics {
+	r.mu.Lock()
+	activeProxies := 0
+	for _, list := range r.portProxies {
+		activeProxies += len(list)
+	}
+	r.mu.Unlock()
+
+	return RouterMetrics{
+		ActivePortProxies: activeProxies,
+		HTTPRequests:      atomic.LoadUint64(&r.httpRequests),
+		TCPConnections:    atomic.LoadUint64(&r.tcpConnections),
+		ProbeRetries:      atomic.LoadUint64(&r.probeRetries),
+		BackendErrors:     atomic.LoadUint64(&r.backendErrors),
+	}
+}
+
 // Start begins listening and serving the main HTTP router.
 func (r *Router) Start() error {
-	ln, err := net.Listen("tcp", r.addr)
+	r.mu.Lock()
+	listenAddr := r.addr
+	r.mu.Unlock()
+
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return fmt.Errorf("router listen on %s: %w", r.addr, err)
+		return fmt.Errorf("router listen on %s: %w", listenAddr, err)
 	}
 
-	log.Printf("router listening on %s", r.addr)
+	actualAddr := ln.Addr().String()
+	r.mu.Lock()
+	r.addr = actualAddr
+	r.mu.Unlock()
+
+	log.Printf("router listening on %s", actualAddr)
 
 	go func() {
 		if err := r.server.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -103,6 +147,8 @@ func (r *Router) Stop(ctx context.Context) error {
 
 // Addr returns the listen address.
 func (r *Router) Addr() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.addr
 }
 
@@ -151,13 +197,13 @@ func (r *Router) AllocatePort(instanceID string, guestPort int, requestedPort in
 
 	go r.acceptLoop(ctx, pp)
 
-	log.Printf("router: public port :%d → instance %s guest :%d (%s)",
+	log.Printf("router: public port :%d -> instance %s guest :%d (%s)",
 		publicPort, instanceID, guestPort, protocol)
 	return publicPort, nil
 }
 
 // FreeAllPorts closes all public port listeners for an instance.
-// Called on instance delete (NOT on stop/pause — listeners survive state transitions).
+// Called on instance delete (NOT on stop/pause; listeners survive state transitions).
 func (r *Router) FreeAllPorts(instanceID string) {
 	r.mu.Lock()
 	proxies, ok := r.portProxies[instanceID]
@@ -241,6 +287,7 @@ func (r *Router) acceptLoop(ctx context.Context, pp *portProxy) {
 }
 
 func (r *Router) handlePortConn(ctx context.Context, clientConn net.Conn, pp *portProxy) {
+	atomic.AddUint64(&r.tcpConnections, 1)
 	defer clientConn.Close()
 	start := time.Now()
 
@@ -248,12 +295,13 @@ func (r *Router) handlePortConn(ctx context.Context, clientConn net.Conn, pp *po
 	r.lm.ResetActivity(pp.instanceID)
 	defer r.lm.OnConnectionClose(pp.instanceID)
 
-	// Ensure instance is running (wake/boot). Separate generous timeout —
+	// Ensure instance is running (wake/boot). Separate generous timeout:
 	// cold boot can take 10-15s (VM create + kernel + harness + run RPC).
 	ensureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := r.lm.EnsureInstance(ensureCtx, pp.instanceID); err != nil {
+		atomic.AddUint64(&r.backendErrors, 1)
 		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
 			log.Printf("router: instance %s disabled, rejecting connection on port :%d", pp.instanceID, pp.publicPort)
 		} else {
@@ -266,50 +314,38 @@ func (r *Router) handlePortConn(ctx context.Context, clientConn net.Conn, pp *po
 	// Get VMM backend endpoint
 	backend, err := r.lm.GetEndpoint(pp.instanceID, pp.guestPort)
 	if err != nil {
+		atomic.AddUint64(&r.backendErrors, 1)
 		log.Printf("router: port :%d no backend for guest :%d: %v", pp.publicPort, pp.guestPort, err)
 		return
 	}
 
-	// Dial backend with retries — app may not have bound its port yet.
-	r.relay(clientConn, backend, 15*time.Second)
+	// Dial backend with readiness probing; app may still be binding its port.
+	r.relay(ctx, clientConn, backend, 15*time.Second)
 }
 
-// dialBackend connects to the backend with retries.
-// Handles two failure modes:
-//  1. Dial refused — app hasn't bound its port yet (normal retry)
-//  2. Dial succeeds but connection closes immediately — the network proxy
-//     (gvproxy) accepted the TCP connection but couldn't forward to the guest
-//     because the app isn't ready. Detected via a non-destructive peek.
+// dialBackend connects to the backend with retries using context.Background().
 func (r *Router) dialBackend(backend string, timeout time.Duration) (net.Conn, error) {
-	deadline := time.Now().Add(timeout)
-	for {
-		conn, err := net.DialTimeout("tcp", backend, 1*time.Second)
-		if err != nil {
-			if time.Now().After(deadline) {
-				return nil, err
-			}
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
+	return r.dialBackendContext(context.Background(), backend, timeout)
+}
 
-		// Peek to check if the connection is alive. gvproxy accepts then
-		// immediately closes if the guest app isn't listening — detect this
-		// with a non-blocking peek so we can retry instead of relaying into
-		// a dead connection. Give the network proxy time to attempt the forward.
-		time.Sleep(100 * time.Millisecond)
-		if tc, ok := conn.(*net.TCPConn); ok {
-			if !connAlive(tc) {
-				conn.Close()
-				if time.Now().After(deadline) {
-					return nil, fmt.Errorf("backend %s: connection accepted but closed (app not ready)", backend)
-				}
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
-		}
+// dialBackendContext connects to the backend with context-aware readiness probing.
+// Handles two failure modes:
+//  1. Dial refused: app has not bound its port yet (normal retry with backoff)
+//  2. Dial succeeds but connection closes immediately: network proxy accepted the TCP
+//     connection before the guest app was ready (detected via non-destructive MSG_PEEK)
+func (r *Router) dialBackendContext(ctx context.Context, backend string, timeout time.Duration) (net.Conn, error) {
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-		return conn, nil
+	conn, retries, err := ProbeTCPWithStats(dialCtx, backend, r.probeCfg)
+	if retries > 0 {
+		atomic.AddUint64(&r.probeRetries, retries)
 	}
+	if err != nil {
+		atomic.AddUint64(&r.backendErrors, 1)
+		return nil, err
+	}
+	return conn, nil
 }
 
 // connAlive checks if a TCP connection is still open using a non-destructive
@@ -317,7 +353,7 @@ func (r *Router) dialBackend(backend string, timeout time.Duration) (net.Conn, e
 func connAlive(tc *net.TCPConn) bool {
 	rc, err := tc.SyscallConn()
 	if err != nil {
-		return true // can't check, assume alive
+		return true // cannot check, assume alive
 	}
 	alive := true
 	rc.Read(func(fd uintptr) bool {
@@ -328,7 +364,7 @@ func connAlive(tc *net.TCPConn) bool {
 		} else if err != nil {
 			alive = false // ECONNRESET, etc.
 		} else if n == 0 {
-			alive = false // EOF — remote closed the connection
+			alive = false // EOF: remote closed the connection
 		}
 		return true
 	})
@@ -336,8 +372,8 @@ func connAlive(tc *net.TCPConn) bool {
 }
 
 // relay does bidirectional TCP copy between client and backend.
-func (r *Router) relay(clientConn net.Conn, backend string, dialTimeout time.Duration) {
-	backendConn, err := r.dialBackend(backend, dialTimeout)
+func (r *Router) relay(ctx context.Context, clientConn net.Conn, backend string, dialTimeout time.Duration) {
+	backendConn, err := r.dialBackendContext(ctx, backend, dialTimeout)
 	if err != nil {
 		log.Printf("router: dial backend %s: %v", backend, err)
 		return
@@ -359,6 +395,8 @@ func (r *Router) relay(clientConn net.Conn, backend string, dialTimeout time.Dur
 // --- Main HTTP router (handle-based routing on :8099) ---
 
 func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
+	atomic.AddUint64(&r.httpRequests, 1)
+
 	inst := r.resolveInstance(req)
 	if inst == nil {
 		http.Error(w, "No active instance", http.StatusServiceUnavailable)
@@ -374,6 +412,7 @@ func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
 	defer cancel()
 
 	if err := r.lm.EnsureInstance(ensureCtx, inst.ID); err != nil {
+		atomic.AddUint64(&r.backendErrors, 1)
 		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
 			http.Error(w, "instance disabled", http.StatusServiceUnavailable)
 		} else {
@@ -393,6 +432,7 @@ func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
 
 	target, err := r.lm.GetEndpoint(inst.ID, guestPort)
 	if err != nil {
+		atomic.AddUint64(&r.backendErrors, 1)
 		http.Error(w, fmt.Sprintf("endpoint not found: %v", err), http.StatusBadGateway)
 		return
 	}
@@ -403,12 +443,12 @@ func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Standard HTTP reverse proxy with retry dial
+	// Standard HTTP reverse proxy with context-aware readiness probe
 	targetURL, _ := url.Parse("http://" + target)
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return r.dialBackend(addr, 15*time.Second)
+				return r.dialBackendContext(ctx, addr, 15*time.Second)
 			},
 		},
 		Director: func(r *http.Request) {
@@ -428,7 +468,7 @@ func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleWebSocket(w http.ResponseWriter, req *http.Request, target string, dialTimeout time.Duration) {
 	// Dial backend with retries (app may not have bound port yet after wake)
-	backendConn, err := r.dialBackend(target, dialTimeout)
+	backendConn, err := r.dialBackendContext(req.Context(), target, dialTimeout)
 	if err != nil {
 		http.Error(w, "WebSocket backend connection failed", http.StatusBadGateway)
 		return
@@ -475,7 +515,7 @@ func (r *Router) handleWebSocket(w http.ResponseWriter, req *http.Request, targe
 
 // resolveInstance finds an instance for a request.
 // Resolution order:
-//  1. X-OmniVM-Instance header → route to instance by ID or handle
+//  1. X-OmniVM-Instance header -> route to instance by ID or handle
 //  2. Fall back to default instance if only one exists
 func (r *Router) resolveInstance(req *http.Request) *lifecycle.Instance {
 	// 1. Header-based routing: X-OmniVM-Instance (ID or handle)
@@ -492,7 +532,7 @@ func (r *Router) resolveInstance(req *http.Request) *lifecycle.Instance {
 		return r.lm.GetDefaultInstance()
 	}
 	if count > 1 {
-		log.Printf("router: ambiguous request to %s with %d instances — use X-OmniVM-Instance header or per-port endpoints", req.URL.Path, count)
+		log.Printf("router: ambiguous request to %s with %d instances; use X-OmniVM-Instance header or per-port endpoints", req.URL.Path, count)
 	}
 	return nil
 }

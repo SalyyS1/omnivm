@@ -1,5 +1,5 @@
 // Package client provides a shared Go client for the ovmd HTTP API.
-// Used by the CLI, MCP server, UI server, and gateway — replaces per-binary
+// Used by the CLI, MCP server, UI server, and gateway - replaces per-binary
 // unix socket boilerplate.
 package client
 
@@ -306,6 +306,15 @@ func (c *Client) WriteWorkspaceFile(ctx context.Context, idOrHandle, path string
 func (c *Client) Status(ctx context.Context) (*DaemonStatus, error) {
 	var out DaemonStatus
 	if err := c.doJSON(ctx, "GET", "/v1/status", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Metrics returns structured lifecycle and ingress telemetry from /v1/metrics.
+func (c *Client) Metrics(ctx context.Context) (*DaemonMetrics, error) {
+	var out DaemonMetrics
+	if err := c.doJSON(ctx, "GET", "/v1/metrics", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

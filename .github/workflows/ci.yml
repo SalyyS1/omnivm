@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # needed for git describe version
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -25,8 +26,8 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Run unit tests
-        run: make test
+      - name: Run unit and concurrency tests with race detector
+        run: go test -race -v ./...
 
       - name: Verify version is set
         run: ./bin/ovm version
@@ -36,3 +37,47 @@ jobs:
           echo '{"jsonrpc":"2.0","method":"initialize","params":{"capabilities":{}},"id":1}' \
             | ./bin/ovm-mcp \
             | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; assert r['serverInfo']['name']=='omnivm', 'bad name'; assert 'tools' in r['capabilities'], 'no tools'; print('MCP handshake OK')"
+
+  release:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build static Linux amd64 release assets
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          LDFLAGS="-s -w -X github.com/SalyyS1/omnivm/internal/version.version=${TAG}"
+          mkdir -p dist/bin
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/bin/ovm ./cmd/ovm
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/bin/ovmd ./cmd/ovmd
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/bin/ovm-harness ./cmd/ovm-harness
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/bin/ovm-mcp ./cmd/ovm-mcp
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "${LDFLAGS}" -o dist/bin/ovm-mcp-guest ./cmd/ovm-mcp-guest
+          cp dist/bin/ovm omnivm-linux-amd64
+          chmod +x omnivm-linux-amd64
+          tar -czf "omnivm-${TAG}-linux-amd64.tar.gz" -C dist/bin ovm ovmd ovm-harness ovm-mcp ovm-mcp-guest
+          sha256sum omnivm-linux-amd64 "omnivm-${TAG}-linux-amd64.tar.gz" > SHA256SUMS
+          ./omnivm-linux-amd64 version
+
+      - name: Publish and upload GitHub Release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" omnivm-linux-amd64 "omnivm-${TAG}-linux-amd64.tar.gz" SHA256SUMS --clobber
+          else
+            gh release create "${TAG}" omnivm-linux-amd64 "omnivm-${TAG}-linux-amd64.tar.gz" SHA256SUMS \
+              --title "OmniVM ${TAG}" \
+              --generate-notes
+          fi

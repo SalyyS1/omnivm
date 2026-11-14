@@ -574,9 +574,23 @@ func cmdRun() {
 }
 
 func cmdStatus() {
-	fmt.Printf("ovm %s\n", version.Version())
+	jsonOut := false
+	for _, arg := range os.Args[2:] {
+		if arg == "--json" || arg == "-j" {
+			jsonOut = true
+		}
+	}
 
 	if !isDaemonRunning() {
+		if jsonOut {
+			out, _ := json.MarshalIndent(map[string]interface{}{
+				"status":  "stopped",
+				"version": version.Version(),
+			}, "", "  ")
+			fmt.Println(string(out))
+			return
+		}
+		fmt.Printf("ovm %s\n", version.Version())
 		fmt.Println("ovmd: not running")
 		return
 	}
@@ -592,8 +606,57 @@ func cmdStatus() {
 	var status map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&status)
 
-	fmt.Printf("ovmd: %s\n", status["status"])
-	fmt.Printf("backend: %s\n", status["backend"])
+	if jsonOut {
+		metricsResp, mErr := client.Get("http://ovm/v1/metrics")
+		if mErr == nil {
+			defer metricsResp.Body.Close()
+			if metricsResp.StatusCode == http.StatusOK {
+				var metricsPayload map[string]interface{}
+				if json.NewDecoder(metricsResp.Body).Decode(&metricsPayload) == nil {
+					if rtr, ok := metricsPayload["router"]; ok {
+						status["router"] = rtr
+					}
+					if ts, ok := metricsPayload["timestamp"]; ok {
+						status["timestamp"] = ts
+					}
+				}
+			}
+		}
+		out, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
+
+	fmt.Printf("ovm %s\n", version.Version())
+	fmt.Printf("ovmd:    %v\n", status["status"])
+	fmt.Printf("backend: %v\n", status["backend"])
+	if up, ok := status["uptime_seconds"].(float64); ok {
+		fmt.Printf("uptime:  %ds\n", int64(up))
+	}
+	if insts, ok := status["instances"].(map[string]interface{}); ok {
+		fmt.Printf("instances: total=%.0f running=%.0f paused=%.0f stopped=%.0f disabled=%.0f\n",
+			numField(insts, "total"),
+			numField(insts, "running"),
+			numField(insts, "paused"),
+			numField(insts, "stopped"),
+			numField(insts, "disabled"))
+	}
+	if m, ok := status["metrics"].(map[string]interface{}); ok {
+		fmt.Printf("lifecycle: cold_starts=%.0f warm_resumes=%.0f coalesced_wakes=%.0f idle_pauses=%.0f idle_stops=%.0f active_conns=%.0f\n",
+			numField(m, "cold_starts"),
+			numField(m, "warm_resumes"),
+			numField(m, "coalesced_wakes"),
+			numField(m, "idle_pauses"),
+			numField(m, "idle_stops"),
+			numField(m, "active_connections"))
+	}
+}
+
+func numField(m map[string]interface{}, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }
 
 func cmdDoctor() {
@@ -666,7 +729,7 @@ func doctorLinux() {
 		fmt.Printf("kvm:                not found (required for VM acceleration)\n")
 	}
 
-	// Cloud Hypervisor — same discovery as the runtime
+	// Cloud Hypervisor - same discovery as the runtime
 	if path := config.FindBinary("cloud-hypervisor", binDir); path != "" {
 		fmt.Printf("cloud-hypervisor:   found at %s\n", path)
 		if out, err := exec.Command(path, "--version").CombinedOutput(); err == nil {
@@ -677,7 +740,7 @@ func doctorLinux() {
 		fmt.Printf("cloud-hypervisor:   not found (install via: make cloud-hypervisor)\n")
 	}
 
-	// virtiofsd — same discovery as the runtime
+	// virtiofsd - same discovery as the runtime
 	if path := config.FindBinary("virtiofsd", binDir); path != "" {
 		fmt.Printf("virtiofsd:          found at %s\n", path)
 		if out, err := exec.Command(path, "--version").CombinedOutput(); err == nil {
@@ -867,14 +930,17 @@ func cmdInstanceStart(client *http.Client) {
 }
 
 func cmdInstanceList(client *http.Client) {
-	// Parse optional --stopped or --running filter
+	// Parse optional --stopped, --running, or --json flags
 	url := "http://ovm/v1/instances"
+	jsonOut := false
 	for _, arg := range os.Args[3:] {
 		switch arg {
 		case "--stopped":
 			url = "http://ovm/v1/instances?state=stopped"
 		case "--running":
 			url = "http://ovm/v1/instances?state=running"
+		case "--json", "-j":
+			jsonOut = true
 		}
 	}
 
@@ -887,6 +953,15 @@ func cmdInstanceList(client *http.Client) {
 
 	var instances []map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&instances)
+
+	if jsonOut {
+		if instances == nil {
+			instances = []map[string]interface{}{}
+		}
+		out, _ := json.MarshalIndent(instances, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
 
 	if len(instances) == 0 {
 		fmt.Println("No instances")
@@ -1403,7 +1478,7 @@ func resolveInstanceTarget(client *http.Client, target string) string {
 		}
 	}
 
-	// Try as handle — scan instances list
+	// Try as handle - scan instances list
 	instResp, err := client.Get("http://ovm/v1/instances")
 	if err != nil {
 		return ""
@@ -1686,7 +1761,7 @@ func cmdMCPInstall() {
 	// Check that claude CLI exists
 	claudeBin, err := exec.LookPath("claude")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "claude CLI not found in PATH — install Claude Code first")
+		fmt.Fprintln(os.Stderr, "claude CLI not found in PATH - install Claude Code first")
 		fmt.Fprintln(os.Stderr, "  https://docs.anthropic.com/en/docs/claude-code")
 		os.Exit(1)
 	}

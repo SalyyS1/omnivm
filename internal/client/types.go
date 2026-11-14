@@ -122,11 +122,58 @@ type SecretInfo struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// InstanceCounts summarizes managed instances by lifecycle state.
+type InstanceCounts struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Starting int `json:"starting"`
+	Paused   int `json:"paused"`
+	Stopped  int `json:"stopped"`
+	Disabled int `json:"disabled"`
+}
+
+// LifecycleMetrics holds scale-to-zero lifecycle counters.
+type LifecycleMetrics struct {
+	ColdStarts        uint64 `json:"cold_starts"`
+	BootFailures      uint64 `json:"boot_failures"`
+	WarmResumes       uint64 `json:"warm_resumes"`
+	CoalescedWakes    uint64 `json:"coalesced_wakes"`
+	ReapWakeHandoffs  uint64 `json:"reap_wake_handoffs"`
+	IdlePauses        uint64 `json:"idle_pauses"`
+	AbortedPauses     uint64 `json:"aborted_pauses"`
+	IdleStops         uint64 `json:"idle_stops"`
+	ActiveConnections int    `json:"active_connections"`
+}
+
+// RouterMetrics holds ingress proxy and probe telemetry.
+type RouterMetrics struct {
+	ActivePortProxies int    `json:"active_port_proxies"`
+	HTTPRequests      uint64 `json:"http_requests"`
+	TCPConnections    uint64 `json:"tcp_connections"`
+	ProbeRetries      uint64 `json:"probe_retries"`
+	BackendErrors     uint64 `json:"backend_errors"`
+}
+
 // DaemonStatus is the response from the status endpoint.
 type DaemonStatus struct {
-	Status       string                 `json:"status"`
-	Backend      string                 `json:"backend"`
-	Capabilities map[string]interface{} `json:"capabilities"`
+	Status        string                 `json:"status"`
+	Version       string                 `json:"version,omitempty"`
+	Backend       string                 `json:"backend"`
+	UptimeSeconds int64                  `json:"uptime_seconds"`
+	Capabilities  map[string]interface{} `json:"capabilities"`
+	Instances     InstanceCounts         `json:"instances"`
+	Metrics       LifecycleMetrics       `json:"metrics"`
+}
+
+// DaemonMetrics is the response from the /v1/metrics endpoint.
+type DaemonMetrics struct {
+	Timestamp     string           `json:"timestamp"`
+	Version       string           `json:"version"`
+	Backend       string           `json:"backend"`
+	UptimeSeconds int64            `json:"uptime_seconds"`
+	Instances     InstanceCounts   `json:"instances"`
+	Lifecycle     LifecycleMetrics `json:"lifecycle"`
+	Router        RouterMetrics    `json:"router"`
 }
 
 // Kit represents a kit manifest.

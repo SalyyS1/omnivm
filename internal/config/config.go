@@ -1,9 +1,13 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -116,6 +120,59 @@ func DefaultConfig() *Config {
 	}
 }
 
+// Validate checks runtime configuration invariants before starting ovmd.
+func (c *Config) Validate() error {
+	if c == nil {
+		return errors.New("config is nil")
+	}
+	if c.DataDir == "" {
+		return errors.New("data_dir must not be empty")
+	}
+	if c.SocketPath == "" {
+		return errors.New("socket_path must not be empty")
+	}
+	if c.DefaultMemoryMB <= 0 || c.DefaultMemoryMB > 1024*1024 {
+		return fmt.Errorf("default_memory_mb must be between 1 and %d, got %d", 1024*1024, c.DefaultMemoryMB)
+	}
+	if c.DefaultVCPUs <= 0 || c.DefaultVCPUs > 1024 {
+		return fmt.Errorf("default_vcpus must be between 1 and 1024, got %d", c.DefaultVCPUs)
+	}
+	if c.MinDiskMB <= 0 {
+		return fmt.Errorf("min_disk_mb must be positive, got %d", c.MinDiskMB)
+	}
+	if c.MaxDiskMB < c.MinDiskMB {
+		return fmt.Errorf("max_disk_mb (%d) must be >= min_disk_mb (%d)", c.MaxDiskMB, c.MinDiskMB)
+	}
+	if c.PauseAfterIdle < 0 {
+		return fmt.Errorf("pause_after_idle must be non-negative, got %v", c.PauseAfterIdle)
+	}
+	if c.StopAfterIdle < 0 {
+		return fmt.Errorf("stop_after_idle must be non-negative, got %v", c.StopAfterIdle)
+	}
+	if c.RouterAddr == "" {
+		return errors.New("router_addr must not be empty")
+	}
+	_, portStr, err := net.SplitHostPort(c.RouterAddr)
+	if err != nil {
+		return fmt.Errorf("invalid router_addr %q: %w", c.RouterAddr, err)
+	}
+	portNum, err := strconv.Atoi(portStr)
+	if err != nil || portNum < 0 || portNum > 65535 {
+		return fmt.Errorf("invalid router_addr port %q: must be between 0 and 65535", portStr)
+	}
+	switch c.NetworkBackend {
+	case "", "auto", "tap":
+	default:
+		return fmt.Errorf("unsupported network_backend %q: expected auto or tap", c.NetworkBackend)
+	}
+	if c.DNSServer != "" {
+		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("invalid dns_server %q: must be an IPv4 address", c.DNSServer)
+		}
+	}
+	return nil
+}
+
 // EnsureDirs creates all required directories.
 func (c *Config) EnsureDirs() error {
 	dirs := []string{
@@ -155,7 +212,7 @@ func (c *Config) ResolveBinaries() {
 }
 
 // FindBinary locates a companion binary by name. Search order:
-//  1. BinDir — directory of the running executable (dev builds)
+//  1. BinDir - directory of the running executable (dev builds)
 //  2. PATH (exec.LookPath)
 //  3. Known system paths (deb/rpm installs)
 //
