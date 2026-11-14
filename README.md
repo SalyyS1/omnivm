@@ -2,9 +2,10 @@
 
 [![CI](https://github.com/SalyyS1/omnivm/actions/workflows/ci.yml/badge.svg)](https://github.com/SalyyS1/omnivm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/SalyyS1/omnivm)](https://github.com/SalyyS1/omnivm/releases)
+[![Pages](https://img.shields.io/badge/simulator-GitHub%20Pages-0ea5e9)](https://salyys1.github.io/omnivm/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Hardware-isolated, scale-to-zero Linux microVMs for AI sandboxes, ephemeral tool execution, and on-demand services.
+Hardware-isolated, scale-to-zero Linux microVMs for AI sandboxes, ephemeral tool execution, and on-demand services. Explore the interactive state-machine, wake-coalescing, and quota simulator at [salyys1.github.io/omnivm](https://salyys1.github.io/omnivm/).
 
 OmniVM runs each workload inside a dedicated [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM backed by Linux KVM and its own guest kernel. Any standard OCI container image (`python:3.12-alpine`, `node:22-alpine`, `ubuntu:24.04`, or custom registries) is unpacked and formatted into an isolated `ext4` root block device. Idle microVMs automatically freeze vCPUs (`PAUSED`) and later scale down to zero host memory (`STOPPED`), while keeping host ingress ports bound so the next HTTP request, TCP connection, `exec` call, or agent tether frame transparently wakes the instance.
 
@@ -48,6 +49,7 @@ Scale-to-zero proxies routinely encounter thundering-herd wake storms and bounda
 - **Zero-Polling Single-Flight Coalescing**: Concurrent callers hitting a `STOPPED`, `STARTING`, or `PAUSED` instance synchronize on a per-instance broadcast channel (`transitionCh`) rather than polling timers. Only the leader goroutine invokes `StartVM` or `ResumeVM`; all concurrent HTTP, TCP, `exec`, and tether callers wake on channel close as soon as the transition completes (`coalesced_wakes`).
 - **Mid-Pause Activity Abort**: Because hypervisor `PauseVM` RPCs execute outside the instance mutex, a new request or lease can arrive while `PauseVM` is in flight. `ovmd` marks `pausing = true`, re-checks `activeConns`, `leaseHeld`, and `transitionCh` immediately upon return, and aborts the pause via an immediate `ResumeVM` (`aborted_pauses`) before notifying waiting callers.
 - **Wake-During-Reap Handoff**: When `StopAfterIdle` expires and the reaper begins tearing down a paused VM (`demux.Stop()` + `StopVM`), `reaping = true` serializes teardown against incoming wakes. Concurrent requests arriving mid-reap block cleanly on `transitionCh` until `StopVM` releases hypervisor resources, then execute a single coordinated cold boot (`reap_wake_handoffs`) instead of racing against a dying VMM socket.
+- **Host Resource Admission Quotas and LRU Paused Eviction**: Operators can cap host-wide resident guest RAM (`OVM_MAX_HOST_MEMORY_MB`), active virtual CPUs (`OVM_MAX_ACTIVE_VCPUS`), and concurrent active microVMs (`OVM_MAX_ACTIVE_VMS`). Before rejecting a cold boot for memory pressure, `ovmd` automatically evicts the least-recently-used idle `PAUSED` microVMs (`paused_evictions`) to reclaim host RAM while keeping newer standbys warm. When active (`STARTING` + `RUNNING`) capacity alone hits a configured ceiling, `ovmd` rejects over-admission with `HTTP 429 Too Many Requests` (`quota_rejections`) across HTTP ingress, wake-on-exec, tether ingress, and nested `guest.spawn` calls.
 
 ### TCP and Virtio-Vsock Readiness Probes
 
@@ -118,20 +120,24 @@ Secrets are encrypted at rest with AES-256-GCM (`~/.omnivm/master.key`) and are 
 ./bin/ovm instance start --name agent --secret OPENAI_API_KEY -- python3 /workspace/agent.py
 ```
 
-### 4. Structured JSON Status and Telemetry
+### 4. Structured JSON, Prometheus, and OpenMetrics Telemetry
 
-Both the CLI and Unix-socket REST API expose structured JSON status and atomic lifecycle/router telemetry:
+Both the CLI and Unix-socket API expose structured JSON status alongside Prometheus `0.0.4` and OpenMetrics `1.0.0` exposition:
 
 ```bash
 ./bin/ovm status --json
+./bin/ovm metrics
+./bin/ovm metrics --prometheus
 ./bin/ovm instance list --json
 ```
 
 ## Control-Plane HTTP API (`~/.omnivm/ovmd.sock`)
 
-Automation tools can query `ovmd` directly over its Unix domain socket:
+Automation tools and Prometheus scrapers can query `ovmd` directly over its Unix domain socket:
 
 ```bash
+curl --unix-socket ~/.omnivm/ovmd.sock http://ovm/metrics
+curl --unix-socket ~/.omnivm/ovmd.sock -H "Accept: application/openmetrics-text" http://ovm/v1/metrics
 curl --unix-socket ~/.omnivm/ovmd.sock http://ovm/v1/metrics
 ```
 
@@ -139,8 +145,8 @@ Example `GET /v1/metrics` response:
 
 ```json
 {
-  "timestamp": "2026-11-14T06:30:00Z",
-  "version": "v0.2.0",
+  "timestamp": "2026-11-15T02:00:00Z",
+  "version": "v0.3.0",
   "backend": "cloud-hypervisor",
   "uptime_seconds": 3420,
   "instances": {
@@ -151,6 +157,16 @@ Example `GET /v1/metrics` response:
     "stopped": 2,
     "disabled": 0
   },
+  "resources": {
+    "resident_memory_mb": 1024,
+    "active_memory_mb": 512,
+    "paused_memory_mb": 512,
+    "max_host_memory_mb": 4096,
+    "active_vcpus": 2,
+    "max_active_vcpus": 8,
+    "active_vms": 1,
+    "max_active_vms": 8
+  },
   "lifecycle": {
     "cold_starts": 6,
     "boot_failures": 0,
@@ -160,6 +176,8 @@ Example `GET /v1/metrics` response:
     "idle_pauses": 18,
     "aborted_pauses": 1,
     "idle_stops": 5,
+    "paused_evictions": 3,
+    "quota_rejections": 0,
     "active_connections": 3
   },
   "router": {
@@ -174,8 +192,9 @@ Example `GET /v1/metrics` response:
 
 Key REST endpoints:
 
-- `GET /v1/status` - Daemon health, backend capabilities, instance counts, and lifecycle summary
-- `GET /v1/metrics` - Timestamped lifecycle, request-coalescing, and router probe telemetry
+- `GET /v1/status` - Daemon health, backend capabilities, instance counts, host resource gauges, and lifecycle summary
+- `GET /metrics` - Prometheus `0.0.4` text exposition (`omnivm_instances`, `omnivm_host_*`, `omnivm_lifecycle_*`, `omnivm_router_*`)
+- `GET /v1/metrics` - Timestamped JSON telemetry (supports `?format=prometheus` and `Accept: application/openmetrics-text`)
 - `POST /v1/instances` / `GET /v1/instances` / `DELETE /v1/instances/{id}` - Instance lifecycle CRUD
 - `POST /v1/instances/{id}/exec` - Wake-on-exec command runner streaming NDJSON stdout/stderr + exit code
 - `POST /v1/instances/{id}/expose` / `DELETE /v1/instances/{id}/expose/{guest_port}` - Dynamic L4/HTTP port publishing

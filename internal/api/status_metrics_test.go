@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -263,6 +264,8 @@ func TestAPIHandlers_ConcurrentReadWriteRaceSafety(t *testing.T) {
 	endpoints := []string{
 		"/v1/status",
 		"/v1/metrics",
+		"/metrics",
+		"/v1/metrics?format=prometheus",
 		"/v1/instances",
 		"/v1/instances/race-svc",
 	}
@@ -308,4 +311,140 @@ func TestAPIHandlers_ConcurrentReadWriteRaceSafety(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestPrometheusAndOpenMetricsExposition_AndQuotaHTTP429(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "ovmd.sock")
+	cfg := &config.Config{
+		SocketPath:      sockPath,
+		WorkspacesDir:   filepath.Join(dir, "workspaces"),
+		DefaultMemoryMB: 256,
+		DefaultVCPUs:    2,
+		MinDiskMB:       256,
+		MaxDiskMB:       4096,
+		MaxHostMemoryMB: 512,
+		MaxActiveVCPUs:  2,
+		MaxActiveVMs:    1,
+		PauseAfterIdle:  5 * time.Minute,
+		StopAfterIdle:   10 * time.Minute,
+	}
+
+	reg, err := registry.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+
+	ss, err := secrets.NewStore(filepath.Join(dir, "master.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls := logstore.NewStore(filepath.Join(dir, "logs"))
+	fv := &apiTestVMM{}
+	lm := lifecycle.NewManager(fv, cfg, ls, nil, nil)
+	defer lm.Shutdown()
+	lm.SetRegistry(reg)
+
+	rtr := router.New(lm, "127.0.0.1:0")
+	if err := rtr.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer rtr.Stop(context.Background())
+
+	lm.CreateInstance("inst-1", []string{"serve"}, []vmm.PortExpose{{GuestPort: 8080, Protocol: "http"}}, lifecycle.WithHandle("svc-1"))
+	lm.CreateInstance("inst-2", []string{"serve"}, []vmm.PortExpose{{GuestPort: 8080, Protocol: "http"}}, lifecycle.WithHandle("svc-2"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := lm.EnsureInstance(ctx, "inst-1"); err != nil {
+		t.Fatalf("boot inst-1: %v", err)
+	}
+
+	srv := NewServer(cfg, fv, lm, reg, ss, ls, rtr)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("srv.Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	// 1. Trigger quota rejection over HTTP ingress router (svc-1 already holds MaxActiveVMs=1).
+	rtrReq, _ := http.NewRequest("GET", "http://"+rtr.Addr()+"/", nil)
+	rtrReq.Header.Set("X-OmniVM-Instance", "svc-2")
+	rtrResp, err := http.DefaultClient.Do(rtrReq)
+	if err != nil {
+		t.Fatalf("router request: %v", err)
+	}
+	rtrResp.Body.Close()
+	if rtrResp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("router status = %d, want 429 Too Many Requests", rtrResp.StatusCode)
+	}
+
+	// 2. Trigger quota rejection over control-plane wake-on-exec API.
+	ts := httptest.NewServer(srv.mux)
+	defer ts.Close()
+
+	execBody, _ := json.Marshal(map[string]interface{}{"command": []string{"echo", "hi"}})
+	execResp, err := http.Post(ts.URL+"/v1/instances/svc-2/exec", "application/json", bytes.NewReader(execBody))
+	if err != nil {
+		t.Fatalf("exec request: %v", err)
+	}
+	execResp.Body.Close()
+	if execResp.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("exec status = %d, want 429 Too Many Requests", execResp.StatusCode)
+	}
+
+	// 3. Verify Prometheus 0.0.4 exposition via client and HTTP.
+	cli := client.New(sockPath)
+	promText, err := cli.MetricsPrometheus(ctx)
+	if err != nil {
+		t.Fatalf("cli.MetricsPrometheus: %v", err)
+	}
+	requiredSnippets := []string{
+		`# TYPE omnivm_up gauge`,
+		`omnivm_up 1`,
+		`omnivm_instances{state="running"} 1`,
+		`omnivm_instances{state="stopped"} 1`,
+		`omnivm_host_resident_memory_bytes 268435456`,
+		`omnivm_host_quota_memory_bytes 536870912`,
+		`omnivm_host_active_vcpus 2`,
+		`omnivm_host_quota_vcpus 2`,
+		`omnivm_host_active_vms 1`,
+		`omnivm_host_quota_active_vms 1`,
+		`omnivm_lifecycle_cold_starts_total 1`,
+		`omnivm_lifecycle_quota_rejections_total 2`,
+	}
+	for _, s := range requiredSnippets {
+		if !strings.Contains(promText, s) {
+			t.Errorf("Prometheus output missing %q\nFull output:\n%s", s, promText)
+		}
+	}
+
+	// 4. Verify OpenMetrics 1.0.0 content negotiation (# EOF and base counter TYPE).
+	omReq, _ := http.NewRequest("GET", ts.URL+"/v1/metrics", nil)
+	omReq.Header.Set("Accept", "application/openmetrics-text; version=1.0.0")
+	omResp, err := http.DefaultClient.Do(omReq)
+	if err != nil {
+		t.Fatalf("openmetrics request: %v", err)
+	}
+	omBytes, _ := io.ReadAll(omResp.Body)
+	omResp.Body.Close()
+	if !strings.HasPrefix(omResp.Header.Get("Content-Type"), "application/openmetrics-text") {
+		t.Errorf("OpenMetrics Content-Type = %q", omResp.Header.Get("Content-Type"))
+	}
+	omBody := string(omBytes)
+	if !strings.HasSuffix(omBody, "# EOF\n") {
+		t.Errorf("OpenMetrics output missing trailing # EOF")
+	}
+	if !strings.Contains(omBody, "# TYPE omnivm_lifecycle_quota_rejections counter\nomnivm_lifecycle_quota_rejections_total 2\n") {
+		t.Errorf("OpenMetrics counter header/sample mismatch:\n%s", omBody)
+	}
+
+	// 5. Verify structured JSON resources block on /v1/status and /v1/metrics.
+	dm, err := cli.Metrics(ctx)
+	if err != nil {
+		t.Fatalf("cli.Metrics: %v", err)
+	}
+	if dm.Resources.ResidentMemoryMB != 256 || dm.Resources.MaxHostMemoryMB != 512 || dm.Lifecycle.QuotaRejections != 2 {
+		t.Errorf("unexpected JSON metrics resources/quotas: %+v / %+v", dm.Resources, dm.Lifecycle)
+	}
 }

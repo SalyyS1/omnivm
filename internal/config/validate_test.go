@@ -97,6 +97,32 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "ipv6_dns_server_rejected",
 			mutate: func(c *Config) { c.DNSServer = "2001:4860:4860::8888" },
 		},
+		{
+			name:   "negative_max_host_memory_mb",
+			mutate: func(c *Config) { c.MaxHostMemoryMB = -256 },
+		},
+		{
+			name: "max_host_memory_below_default_memory",
+			mutate: func(c *Config) {
+				c.DefaultMemoryMB = 512
+				c.MaxHostMemoryMB = 256
+			},
+		},
+		{
+			name:   "negative_max_active_vcpus",
+			mutate: func(c *Config) { c.MaxActiveVCPUs = -1 },
+		},
+		{
+			name: "max_active_vcpus_below_default_vcpus",
+			mutate: func(c *Config) {
+				c.DefaultVCPUs = 4
+				c.MaxActiveVCPUs = 2
+			},
+		},
+		{
+			name:   "negative_max_active_vms",
+			mutate: func(c *Config) { c.MaxActiveVMs = -1 },
+		},
 	}
 
 	for _, tc := range tests {

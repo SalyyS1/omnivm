@@ -320,6 +320,20 @@ func (c *Client) Metrics(ctx context.Context) (*DaemonMetrics, error) {
 	return &out, nil
 }
 
+// MetricsPrometheus returns Prometheus 0.0.4 text exposition from /metrics.
+func (c *Client) MetricsPrometheus(ctx context.Context) (string, error) {
+	resp, err := c.doRaw(ctx, "GET", "/metrics", nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // --- Kits ---
 
 // ListKits returns installed kits.

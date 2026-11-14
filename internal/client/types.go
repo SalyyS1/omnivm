@@ -132,6 +132,18 @@ type InstanceCounts struct {
 	Disabled int `json:"disabled"`
 }
 
+// HostResourceMetrics reports live host memory, vCPU, and active VM usage alongside configured ceilings.
+type HostResourceMetrics struct {
+	ResidentMemoryMB int `json:"resident_memory_mb"`
+	ActiveMemoryMB   int `json:"active_memory_mb"`
+	PausedMemoryMB   int `json:"paused_memory_mb"`
+	MaxHostMemoryMB  int `json:"max_host_memory_mb"`
+	ActiveVCPUs      int `json:"active_vcpus"`
+	MaxActiveVCPUs   int `json:"max_active_vcpus"`
+	ActiveVMs        int `json:"active_vms"`
+	MaxActiveVMs     int `json:"max_active_vms"`
+}
+
 // LifecycleMetrics holds scale-to-zero lifecycle counters.
 type LifecycleMetrics struct {
 	ColdStarts        uint64 `json:"cold_starts"`
@@ -142,6 +154,8 @@ type LifecycleMetrics struct {
 	IdlePauses        uint64 `json:"idle_pauses"`
 	AbortedPauses     uint64 `json:"aborted_pauses"`
 	IdleStops         uint64 `json:"idle_stops"`
+	PausedEvictions   uint64 `json:"paused_evictions"`
+	QuotaRejections   uint64 `json:"quota_rejections"`
 	ActiveConnections int    `json:"active_connections"`
 }
 
@@ -162,18 +176,20 @@ type DaemonStatus struct {
 	UptimeSeconds int64                  `json:"uptime_seconds"`
 	Capabilities  map[string]interface{} `json:"capabilities"`
 	Instances     InstanceCounts         `json:"instances"`
+	Resources     HostResourceMetrics    `json:"resources"`
 	Metrics       LifecycleMetrics       `json:"metrics"`
 }
 
 // DaemonMetrics is the response from the /v1/metrics endpoint.
 type DaemonMetrics struct {
-	Timestamp     string           `json:"timestamp"`
-	Version       string           `json:"version"`
-	Backend       string           `json:"backend"`
-	UptimeSeconds int64            `json:"uptime_seconds"`
-	Instances     InstanceCounts   `json:"instances"`
-	Lifecycle     LifecycleMetrics `json:"lifecycle"`
-	Router        RouterMetrics    `json:"router"`
+	Timestamp     string              `json:"timestamp"`
+	Version       string              `json:"version"`
+	Backend       string              `json:"backend"`
+	UptimeSeconds int64               `json:"uptime_seconds"`
+	Instances     InstanceCounts      `json:"instances"`
+	Resources     HostResourceMetrics `json:"resources"`
+	Lifecycle     LifecycleMetrics    `json:"lifecycle"`
+	Router        RouterMetrics       `json:"router"`
 }
 
 // Kit represents a kit manifest.

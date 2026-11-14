@@ -297,6 +297,8 @@ type LifecycleMetrics struct {
 	IdlePauses        uint64 `json:"idle_pauses"`
 	AbortedPauses     uint64 `json:"aborted_pauses"`
 	IdleStops         uint64 `json:"idle_stops"`
+	PausedEvictions   uint64 `json:"paused_evictions"`
+	QuotaRejections   uint64 `json:"quota_rejections"`
 	ActiveConnections int    `json:"active_connections"`
 }
 
@@ -309,6 +311,8 @@ type lifecycleCounters struct {
 	idlePauses       uint64
 	abortedPauses    uint64
 	idleStops        uint64
+	pausedEvictions  uint64
+	quotaRejections  uint64
 }
 
 // FirstGuestPort returns the first exposed guest port, or 0 if none.
@@ -347,7 +351,8 @@ func (inst *Instance) MergeSecretKeys(keys []string) {
 
 // Manager owns instances and drives their lifecycle.
 type Manager struct {
-	mu        sync.Mutex
+	admissionMu sync.Mutex
+	mu          sync.Mutex
 	instances map[string]*Instance
 	vmm       vmm.VMM
 	cfg       *config.Config
@@ -428,6 +433,8 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		IdlePauses:        atomic.LoadUint64(&m.metrics.idlePauses),
 		AbortedPauses:     atomic.LoadUint64(&m.metrics.abortedPauses),
 		IdleStops:         atomic.LoadUint64(&m.metrics.idleStops),
+		PausedEvictions:   atomic.LoadUint64(&m.metrics.pausedEvictions),
+		QuotaRejections:   atomic.LoadUint64(&m.metrics.quotaRejections),
 		ActiveConnections: activeConns,
 	}
 }
@@ -801,17 +808,11 @@ func (m *Manager) ensureInstanceLoop(ctx context.Context, inst *Instance, forceE
 			inst.mu.Unlock()
 			return nil
 		case StatePaused:
-			inst.resuming = true
-			inst.lastBootErr = nil
-			if inst.stopTimer != nil {
-				inst.stopTimer.Stop()
-				inst.stopTimer = nil
-			}
-			handle := inst.Handle
 			inst.mu.Unlock()
-			return m.finishResume(inst, handle)
+			return m.admitAndResume(ctx, inst)
 		case StateStopped:
-			return m.bootInstanceLocked(ctx, inst)
+			inst.mu.Unlock()
+			return m.admitAndBoot(ctx, inst)
 		default:
 			st := inst.State
 			inst.mu.Unlock()
@@ -826,43 +827,21 @@ func (m *Manager) bootInstance(ctx context.Context, inst *Instance) error {
 		inst.mu.Unlock()
 		return m.ensureInstanceLoop(ctx, inst, false)
 	}
-	return m.bootInstanceLocked(ctx, inst)
+	inst.mu.Unlock()
+	return m.admitAndBoot(ctx, inst)
 }
 
-// bootInstanceLocked starts a cold boot. Caller must hold inst.mu and verify
-// inst.State == StateStopped with no in-flight transition; inst.mu is unlocked before returning.
-func (m *Manager) bootInstanceLocked(ctx context.Context, inst *Instance) error {
-	// Crash backoff: if the instance crashed recently, delay or refuse boot.
-	// Max 5 consecutive crashes within a 2-minute window. Resets after 2 minutes.
-	if inst.crashCount > 0 && !inst.lastCrashAt.IsZero() {
-		if time.Since(inst.lastCrashAt) > 2*time.Minute {
-			inst.crashCount = 0
-		} else if inst.crashCount >= 5 {
-			err := fmt.Errorf("instance %s crash loop (crashed %d times, last at %s)",
-				inst.ID, inst.crashCount, inst.lastCrashAt.Format(time.RFC3339))
-			inst.lastBootErr = err
-			inst.broadcastLocked()
-			inst.mu.Unlock()
-			atomic.AddUint64(&m.metrics.bootFailures, 1)
-			return err
-		}
-	}
-
-	now := time.Now()
-	inst.State = StateStarting
-	inst.StoppedAt = time.Time{}
-	inst.UpdatedAt = now
-	inst.lastBootErr = nil
-	imageRef := inst.ImageRef
-	rootfsPath := inst.RootfsPath
-	diskMB := inst.DiskMB
-	instMemMB := inst.MemoryMB
-	instVCPUs := inst.VCPUs
-	wsPath := inst.WorkspacePath
-	exposePortsSnapshot := make([]vmm.PortExpose, len(inst.ExposePorts))
-	copy(exposePortsSnapshot, inst.ExposePorts)
-	inst.broadcastLocked()
-	inst.mu.Unlock()
+func (m *Manager) finishBootFromStarting(
+	ctx context.Context,
+	inst *Instance,
+	imageRef string,
+	rootfsPath string,
+	diskMB int,
+	instMemMB int,
+	instVCPUs int,
+	wsPath string,
+	exposePortsSnapshot []vmm.PortExpose,
+) error {
 	m.notifyStateChange(inst.ID, StateStarting)
 
 	failBoot := func(err error) error {
@@ -1308,16 +1287,8 @@ func (m *Manager) resumeInstance(inst *Instance) error {
 		inst.mu.Unlock()
 		return nil
 	}
-	inst.resuming = true
-	inst.lastBootErr = nil
-	if inst.stopTimer != nil {
-		inst.stopTimer.Stop()
-		inst.stopTimer = nil
-	}
-	handle := inst.Handle
 	inst.mu.Unlock()
-
-	return m.finishResume(inst, handle)
+	return m.admitAndResume(context.Background(), inst)
 }
 
 func (m *Manager) finishResume(inst *Instance, handle vmm.Handle) error {

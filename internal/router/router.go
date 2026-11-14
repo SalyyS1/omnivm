@@ -415,6 +415,10 @@ func (r *Router) handleRequest(w http.ResponseWriter, req *http.Request) {
 		atomic.AddUint64(&r.backendErrors, 1)
 		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
 			http.Error(w, "instance disabled", http.StatusServiceUnavailable)
+		} else if errors.Is(err, lifecycle.ErrQuotaExceeded) {
+			log.Printf("router: quota exceeded waking instance %s: %v", inst.ID, err)
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, fmt.Sprintf("Quota exceeded: %v", err), http.StatusTooManyRequests)
 		} else {
 			log.Printf("router: ensure instance %s: %v", inst.ID, err)
 			w.Header().Set("Retry-After", "3")

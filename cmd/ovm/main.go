@@ -63,6 +63,8 @@ func main() {
 		cmdRun()
 	case "status":
 		cmdStatus()
+	case "metrics":
+		cmdMetrics()
 	case "doctor":
 		cmdDoctor()
 	case "instance":
@@ -94,6 +96,7 @@ Commands:
   down       Stop ovmd daemon
   run        Run a command in an ephemeral microVM (start + follow + delete)
   status     Show daemon status
+  metrics    Export daemon telemetry (--prometheus or --json)
   doctor     Print platform and backend info
   instance   Manage instances (start, list, info, disable, delete, pause, resume, prune)
   exec       Execute a command in a running instance
@@ -642,14 +645,67 @@ func cmdStatus() {
 			numField(insts, "disabled"))
 	}
 	if m, ok := status["metrics"].(map[string]interface{}); ok {
-		fmt.Printf("lifecycle: cold_starts=%.0f warm_resumes=%.0f coalesced_wakes=%.0f idle_pauses=%.0f idle_stops=%.0f active_conns=%.0f\n",
+		fmt.Printf("lifecycle: cold_starts=%.0f warm_resumes=%.0f coalesced_wakes=%.0f idle_pauses=%.0f idle_stops=%.0f evictions=%.0f quota_rejects=%.0f active_conns=%.0f\n",
 			numField(m, "cold_starts"),
 			numField(m, "warm_resumes"),
 			numField(m, "coalesced_wakes"),
 			numField(m, "idle_pauses"),
 			numField(m, "idle_stops"),
+			numField(m, "paused_evictions"),
+			numField(m, "quota_rejections"),
 			numField(m, "active_connections"))
 	}
+	if res, ok := status["resources"].(map[string]interface{}); ok {
+		fmt.Printf("resources: resident_mem=%.0fMB active_mem=%.0fMB paused_mem=%.0fMB active_vcpus=%.0f active_vms=%.0f\n",
+			numField(res, "resident_memory_mb"),
+			numField(res, "active_memory_mb"),
+			numField(res, "paused_memory_mb"),
+			numField(res, "active_vcpus"),
+			numField(res, "active_vms"))
+	}
+}
+
+func cmdMetrics() {
+	if !isDaemonRunning() {
+		fmt.Fprintln(os.Stderr, "ovmd is not running. Run 'ovm up' first.")
+		os.Exit(1)
+	}
+
+	promFormat := false
+	for _, arg := range os.Args[2:] {
+		if arg == "--prometheus" || arg == "--prom" || arg == "-p" {
+			promFormat = true
+		}
+	}
+
+	client := httpClient()
+	endpoint := "http://ovm/v1/metrics"
+	if promFormat {
+		endpoint = "http://ovm/metrics"
+	}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get metrics: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read metrics: %v\n", err)
+		os.Exit(1)
+	}
+	if promFormat {
+		fmt.Print(string(body))
+		return
+	}
+	var payload interface{}
+	if json.Unmarshal(body, &payload) == nil {
+		pretty, _ := json.MarshalIndent(payload, "", "  ")
+		fmt.Println(string(pretty))
+		return
+	}
+	fmt.Println(string(body))
 }
 
 func numField(m map[string]interface{}, key string) float64 {

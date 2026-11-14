@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -101,6 +102,7 @@ func (s *Server) registerRoutes() {
 	// Status and telemetry
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
+	s.mux.HandleFunc("GET /metrics", s.handlePrometheusMetrics)
 }
 
 // Start begins listening on the unix socket.
@@ -143,6 +145,7 @@ type statusResponse struct {
 	UptimeSeconds int64                         `json:"uptime_seconds"`
 	Capabilities  map[string]interface{}        `json:"capabilities"`
 	Instances     lifecycle.InstanceStateCounts `json:"instances"`
+	Resources     lifecycle.HostResourceMetrics `json:"resources"`
 	Metrics       lifecycle.LifecycleMetrics    `json:"metrics"`
 }
 
@@ -152,6 +155,7 @@ type metricsResponse struct {
 	Backend       string                        `json:"backend"`
 	UptimeSeconds int64                         `json:"uptime_seconds"`
 	Instances     lifecycle.InstanceStateCounts `json:"instances"`
+	Resources     lifecycle.HostResourceMetrics `json:"resources"`
 	Lifecycle     lifecycle.LifecycleMetrics    `json:"lifecycle"`
 	Router        router.RouterMetrics          `json:"router"`
 }
@@ -175,9 +179,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	var counts lifecycle.InstanceStateCounts
 	var lmMetrics lifecycle.LifecycleMetrics
+	var resMetrics lifecycle.HostResourceMetrics
 	if s.lifecycle != nil {
 		counts = s.lifecycle.InstanceCounts()
 		lmMetrics = s.lifecycle.Metrics()
+		resMetrics = s.lifecycle.HostResources()
+	} else if s.cfg != nil {
+		resMetrics.MaxHostMemoryMB = s.cfg.MaxHostMemoryMB
+		resMetrics.MaxActiveVCPUs = s.cfg.MaxActiveVCPUs
+		resMetrics.MaxActiveVMs = s.cfg.MaxActiveVMs
 	}
 
 	writeJSON(w, http.StatusOK, statusResponse{
@@ -192,11 +202,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,
+		Resources: resMetrics,
 		Metrics:   lmMetrics,
 	})
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if wantsPrometheusFormat(r) {
+		s.handlePrometheusMetrics(w, r)
+		return
+	}
+
 	backendName := ""
 	if s.vmm != nil {
 		backendName = s.vmm.Capabilities().Name
@@ -204,9 +220,15 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	var counts lifecycle.InstanceStateCounts
 	var lmMetrics lifecycle.LifecycleMetrics
+	var resMetrics lifecycle.HostResourceMetrics
 	if s.lifecycle != nil {
 		counts = s.lifecycle.InstanceCounts()
 		lmMetrics = s.lifecycle.Metrics()
+		resMetrics = s.lifecycle.HostResources()
+	} else if s.cfg != nil {
+		resMetrics.MaxHostMemoryMB = s.cfg.MaxHostMemoryMB
+		resMetrics.MaxActiveVCPUs = s.cfg.MaxActiveVCPUs
+		resMetrics.MaxActiveVMs = s.cfg.MaxActiveVMs
 	}
 
 	var rtrMetrics router.RouterMetrics
@@ -220,6 +242,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		Backend:       backendName,
 		UptimeSeconds: s.uptimeSeconds(),
 		Instances:     counts,
+		Resources:     resMetrics,
 		Lifecycle:     lmMetrics,
 		Router:        rtrMetrics,
 	})
@@ -689,8 +712,12 @@ func (s *Server) handleExecInstance(w http.ResponseWriter, r *http.Request) {
 	wakeCtx, wakeCancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer wakeCancel()
 	if err := s.lifecycle.EnsureInstance(wakeCtx, inst.ID); err != nil {
-		if err == lifecycle.ErrInstanceDisabled {
+		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
 			writeError(w, http.StatusConflict, "instance is disabled")
+			return
+		}
+		if errors.Is(err, lifecycle.ErrQuotaExceeded) {
+			writeError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("wake failed: %v", err))
@@ -699,8 +726,12 @@ func (s *Server) handleExecInstance(w http.ResponseWriter, r *http.Request) {
 
 	execID, startedAt, doneCh, err := s.lifecycle.ExecInstance(r.Context(), inst.ID, req.Command, req.Env)
 	if err != nil {
-		if err == lifecycle.ErrInstanceDisabled {
+		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
 			writeError(w, http.StatusConflict, "instance is disabled")
+			return
+		}
+		if errors.Is(err, lifecycle.ErrQuotaExceeded) {
+			writeError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -794,7 +825,15 @@ func (s *Server) handleResumeInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.lifecycle.ResumeInstance(id); err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		if errors.Is(err, lifecycle.ErrQuotaExceeded) {
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
+		if errors.Is(err, lifecycle.ErrInstanceDisabled) {
+			writeError(w, http.StatusConflict, "instance is disabled")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "running"})
@@ -1478,6 +1517,10 @@ func (s *Server) handleTetherIngress(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	if err := s.lifecycle.EnsureInstance(ctx, inst.ID); err != nil {
+		if errors.Is(err, lifecycle.ErrQuotaExceeded) {
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("wake failed: %v", err))
 		return
 	}

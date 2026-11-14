@@ -80,6 +80,18 @@ type Config struct {
 
 	// MaxDiskMB caps the root disk size an instance may request.
 	MaxDiskMB int
+
+	// MaxHostMemoryMB caps aggregate resident guest memory (in MB) across
+	// STARTING, RUNNING, and warm PAUSED instances. Zero means unlimited.
+	MaxHostMemoryMB int
+
+	// MaxActiveVCPUs caps aggregate virtual CPUs across active (STARTING and
+	// RUNNING) instances. Zero means unlimited.
+	MaxActiveVCPUs int
+
+	// MaxActiveVMs caps concurrent active (STARTING and RUNNING) instances on
+	// the host. Zero means unlimited.
+	MaxActiveVMs int
 }
 
 // DefaultConfig returns the default configuration.
@@ -117,7 +129,22 @@ func DefaultConfig() *Config {
 		DNSServer:       os.Getenv("OVM_DNS"),
 		MinDiskMB:       512,
 		MaxDiskMB:       64 * 1024,
+		MaxHostMemoryMB: parseOptionalEnvInt("OVM_MAX_HOST_MEMORY_MB"),
+		MaxActiveVCPUs:  parseOptionalEnvInt("OVM_MAX_ACTIVE_VCPUS"),
+		MaxActiveVMs:    parseOptionalEnvInt("OVM_MAX_ACTIVE_VMS"),
 	}
+}
+
+func parseOptionalEnvInt(key string) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return -1
+	}
+	return v
 }
 
 // Validate checks runtime configuration invariants before starting ovmd.
@@ -142,6 +169,21 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxDiskMB < c.MinDiskMB {
 		return fmt.Errorf("max_disk_mb (%d) must be >= min_disk_mb (%d)", c.MaxDiskMB, c.MinDiskMB)
+	}
+	if c.MaxHostMemoryMB < 0 {
+		return fmt.Errorf("max_host_memory_mb must be non-negative, got %d", c.MaxHostMemoryMB)
+	}
+	if c.MaxHostMemoryMB > 0 && c.MaxHostMemoryMB < c.DefaultMemoryMB {
+		return fmt.Errorf("max_host_memory_mb (%d) must be 0 or >= default_memory_mb (%d)", c.MaxHostMemoryMB, c.DefaultMemoryMB)
+	}
+	if c.MaxActiveVCPUs < 0 {
+		return fmt.Errorf("max_active_vcpus must be non-negative, got %d", c.MaxActiveVCPUs)
+	}
+	if c.MaxActiveVCPUs > 0 && c.MaxActiveVCPUs < c.DefaultVCPUs {
+		return fmt.Errorf("max_active_vcpus (%d) must be 0 or >= default_vcpus (%d)", c.MaxActiveVCPUs, c.DefaultVCPUs)
+	}
+	if c.MaxActiveVMs < 0 {
+		return fmt.Errorf("max_active_vms must be non-negative, got %d", c.MaxActiveVMs)
 	}
 	if c.PauseAfterIdle < 0 {
 		return fmt.Errorf("pause_after_idle must be non-negative, got %v", c.PauseAfterIdle)
