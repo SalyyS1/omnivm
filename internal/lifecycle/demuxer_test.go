@@ -118,11 +118,16 @@ func TestDemuxerCallResponse(t *testing.T) {
 func TestDemuxerNotificationRouting(t *testing.T) {
 	ch := newMockChannel()
 
-	var gotMethod string
-	var gotParams json.RawMessage
+	type notifEvent struct {
+		method string
+		params json.RawMessage
+	}
+	notifCh := make(chan notifEvent, 1)
 	d := newChannelDemuxer(ch, func(method string, params json.RawMessage) {
-		gotMethod = method
-		gotParams = params
+		select {
+		case notifCh <- notifEvent{method: method, params: params}:
+		default:
+		}
 	})
 	defer d.Stop()
 
@@ -132,13 +137,17 @@ func TestDemuxerNotificationRouting(t *testing.T) {
 		"params":  map[string]string{"stream": "stdout", "line": "hello"},
 	})
 	ch.recvCh <- notif
-	time.Sleep(100 * time.Millisecond)
 
-	if gotMethod != "log" {
-		t.Fatalf("expected method 'log', got %q", gotMethod)
-	}
-	if gotParams == nil {
-		t.Fatal("expected params, got nil")
+	select {
+	case ev := <-notifCh:
+		if ev.method != "log" {
+			t.Fatalf("expected method 'log', got %q", ev.method)
+		}
+		if ev.params == nil {
+			t.Fatal("expected params, got nil")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for routed notification")
 	}
 }
 
@@ -365,7 +374,7 @@ func TestExecWaiterNotBlockedByMissingExecID(t *testing.T) {
 		execWaiters: make(map[string]chan int),
 	}
 
-	// Signal for an exec ID that has no waiter — should not panic
+	// Signal for an exec ID that has no waiter - should not panic
 	inst.mu.Lock()
 	if ch, ok := inst.execWaiters["nonexistent"]; ok {
 		ch <- 0
