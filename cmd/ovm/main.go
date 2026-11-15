@@ -871,6 +871,8 @@ func cmdInstance() {
 		cmdInstanceUnexpose(client)
 	case "prune":
 		cmdInstancePrune(client)
+	case "migrate":
+		cmdInstanceMigrate(client)
 	case "help", "--help", "-h":
 		instanceUsage()
 	default:
@@ -895,6 +897,7 @@ Commands:
   pause      Pause a running instance (SIGSTOP)
   resume     Resume a paused instance (SIGCONT)
   prune      Remove stopped instances older than a threshold
+  migrate    Live-migrate a running instance to another ovmd socket
 
 Examples:
   ovm instance start --name web -- python3 -m http.server 80
@@ -908,7 +911,8 @@ Examples:
   ovm instance restart web
   ovm instance disable web
   ovm instance delete web
-  ovm instance prune --stopped-older-than 7d`)
+  ovm instance prune --stopped-older-than 7d
+  ovm instance migrate web --dest /run/ovmd-node2.sock`)
 }
 
 // cmdInstanceStart starts a new instance.

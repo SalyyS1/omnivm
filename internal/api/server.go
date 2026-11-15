@@ -81,6 +81,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/instances/prune", s.handlePruneInstances)
 	s.mux.HandleFunc("POST /v1/instances/{id}/snapshots", s.handleCreateSnapshot)
 	s.mux.HandleFunc("POST /v1/instances/{id}/branch", s.handleBranchInstance)
+	s.mux.HandleFunc("POST /v1/instances/{id}/migrate", s.handleMigrateInstance)
 
 	// Snapshot routes
 	s.mux.HandleFunc("GET /v1/snapshots", s.handleListSnapshots)
