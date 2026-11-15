@@ -69,6 +69,8 @@ func main() {
 		cmdDoctor()
 	case "instance":
 		cmdInstance()
+	case "snapshot":
+		cmdSnapshot()
 	case "exec":
 		cmdExec()
 	case "logs":
@@ -98,7 +100,8 @@ Commands:
   status     Show daemon status
   metrics    Export daemon telemetry (--prometheus or --json)
   doctor     Print platform and backend info
-  instance   Manage instances (start, list, info, disable, delete, pause, resume, prune)
+  instance   Manage instances (start, branch, list, info, disable, delete, pause, resume, prune)
+  snapshot   Manage Copy-on-Write microVM snapshots and branches (create, list, info, branch, delete)
   exec       Execute a command in a running instance
   logs       Stream instance logs
   secret     Manage secrets (set, list, delete)
@@ -645,7 +648,7 @@ func cmdStatus() {
 			numField(insts, "disabled"))
 	}
 	if m, ok := status["metrics"].(map[string]interface{}); ok {
-		fmt.Printf("lifecycle: cold_starts=%.0f warm_resumes=%.0f coalesced_wakes=%.0f idle_pauses=%.0f idle_stops=%.0f evictions=%.0f quota_rejects=%.0f active_conns=%.0f\n",
+		fmt.Printf("lifecycle: cold_starts=%.0f warm_resumes=%.0f coalesced_wakes=%.0f idle_pauses=%.0f idle_stops=%.0f evictions=%.0f quota_rejects=%.0f snapshots=%.0f branches=%.0f cow_saved=%s active_conns=%.0f\n",
 			numField(m, "cold_starts"),
 			numField(m, "warm_resumes"),
 			numField(m, "coalesced_wakes"),
@@ -653,11 +656,16 @@ func cmdStatus() {
 			numField(m, "idle_stops"),
 			numField(m, "paused_evictions"),
 			numField(m, "quota_rejections"),
+			numField(m, "snapshots_created"),
+			numField(m, "snapshot_branches"),
+			formatBytesUint(uint64(numField(m, "cow_saved_bytes"))),
 			numField(m, "active_connections"))
 	}
 	if res, ok := status["resources"].(map[string]interface{}); ok {
-		fmt.Printf("resources: resident_mem=%.0fMB active_mem=%.0fMB paused_mem=%.0fMB active_vcpus=%.0f active_vms=%.0f\n",
+		fmt.Printf("resources: resident_mem=%.0fMB effective_mem=%.0fMB ksm_saved=%.0fMB active_mem=%.0fMB paused_mem=%.0fMB active_vcpus=%.0f active_vms=%.0f\n",
 			numField(res, "resident_memory_mb"),
+			numField(res, "effective_resident_memory_mb"),
+			numField(res, "ksm_saved_memory_mb"),
 			numField(res, "active_memory_mb"),
 			numField(res, "paused_memory_mb"),
 			numField(res, "active_vcpus"),
@@ -841,6 +849,8 @@ func cmdInstance() {
 	switch os.Args[2] {
 	case "start":
 		cmdInstanceStart(client)
+	case "branch":
+		cmdSnapshotBranch(client, os.Args[3:], false)
 	case "list":
 		cmdInstanceList(client)
 	case "info":
@@ -1127,6 +1137,12 @@ func cmdInstanceInfo(client *http.Client) {
 	fmt.Printf("Enabled:     %s\n", enabledStr)
 	if imageRef, ok := inst["image_ref"].(string); ok && imageRef != "" {
 		fmt.Printf("Image:       %s\n", imageRef)
+	}
+	if parentID, ok := inst["parent_id"].(string); ok && parentID != "" {
+		fmt.Printf("Parent ID:   %s\n", parentID)
+	}
+	if srcSnap, ok := inst["source_snapshot_id"].(string); ok && srcSnap != "" {
+		fmt.Printf("Snapshot ID: %s\n", srcSnap)
 	}
 	if cmd, ok := inst["command"].([]interface{}); ok && len(cmd) > 0 {
 		parts := make([]string, len(cmd))

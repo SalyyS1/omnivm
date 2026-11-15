@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/image"
+	"github.com/SalyyS1/omnivm/internal/ksm"
 	"github.com/SalyyS1/omnivm/internal/logstore"
 	"github.com/SalyyS1/omnivm/internal/overlay"
 	"github.com/SalyyS1/omnivm/internal/registry"
@@ -105,9 +107,10 @@ type Instance struct {
 	// Idle policy: "default" (heartbeat + lease + inbound), "leases_only" (lease + inbound only)
 	IdlePolicy string
 
-	// Parent-child relationship for guest orchestration
-	ParentID     string           // ID of the parent instance that spawned this one (empty = top-level)
-	Capabilities *CapabilityToken // spawn capabilities (nil = no guest API spawning)
+	// Parent-child relationship for guest orchestration and snapshot branching
+	ParentID         string           // ID of the parent instance that spawned or branched this one (empty = top-level)
+	SourceSnapshotID string           // ID of the snapshot this instance was branched from (empty = fresh)
+	Capabilities     *CapabilityToken // spawn capabilities (nil = no guest API spawning)
 
 	// Keepalive lease - prevents pause while held, auto-expires after TTL
 	leaseHeld   bool
@@ -159,6 +162,7 @@ type InstanceSnapshot struct {
 	HarnessVersion    string
 	IdlePolicy        string
 	ParentID          string
+	SourceSnapshotID  string
 	ActiveConnections int
 	LastActivity      time.Time
 	LeaseHeld         bool
@@ -266,6 +270,7 @@ func (inst *Instance) Snapshot() InstanceSnapshot {
 		HarnessVersion:    inst.HarnessVersion,
 		IdlePolicy:        inst.IdlePolicy,
 		ParentID:          inst.ParentID,
+		SourceSnapshotID:  inst.SourceSnapshotID,
 		ActiveConnections: inst.activeConns,
 		LastActivity:      inst.lastActivity,
 		LeaseHeld:         inst.leaseHeld,
@@ -299,6 +304,9 @@ type LifecycleMetrics struct {
 	IdleStops         uint64 `json:"idle_stops"`
 	PausedEvictions   uint64 `json:"paused_evictions"`
 	QuotaRejections   uint64 `json:"quota_rejections"`
+	SnapshotsCreated  uint64 `json:"snapshots_created"`
+	SnapshotBranches  uint64 `json:"snapshot_branches"`
+	CoWSavedBytes     uint64 `json:"cow_saved_bytes"`
 	ActiveConnections int    `json:"active_connections"`
 }
 
@@ -313,6 +321,9 @@ type lifecycleCounters struct {
 	idleStops        uint64
 	pausedEvictions  uint64
 	quotaRejections  uint64
+	snapshotsCreated uint64
+	snapshotBranches uint64
+	cowSavedBytes    uint64
 }
 
 // FirstGuestPort returns the first exposed guest port, or 0 if none.
@@ -353,16 +364,18 @@ func (inst *Instance) MergeSecretKeys(keys []string) {
 type Manager struct {
 	admissionMu sync.Mutex
 	mu          sync.Mutex
-	instances map[string]*Instance
-	vmm       vmm.VMM
-	cfg       *config.Config
-	logStore  *logstore.Store
+	instances   map[string]*Instance
+	snapshots   map[string]*Snapshot
+	vmm         vmm.VMM
+	cfg         *config.Config
+	logStore    *logstore.Store
 
 	imageCache  *image.Cache
 	overlay     overlay.Overlay
 	secretStore *secrets.Store
 	registry    *registry.DB
 	tetherStore *tether.Store
+	ksmGov      *ksm.Governor
 
 	metrics lifecycleCounters
 
@@ -377,14 +390,34 @@ type Manager struct {
 
 // NewManager creates a lifecycle manager.
 func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *image.Cache, ov overlay.Overlay) *Manager {
+	ksmMode := ksm.ModeOff
+	if cfg != nil && cfg.KSMGovernor != "" {
+		ksmMode = cfg.KSMGovernor
+	}
 	return &Manager{
 		instances:  make(map[string]*Instance),
+		snapshots:  make(map[string]*Snapshot),
 		vmm:        v,
 		cfg:        cfg,
 		logStore:   ls,
 		imageCache: imgCache,
 		overlay:    ov,
+		ksmGov:     ksm.NewGovernor("", ksmMode, 0),
 	}
+}
+
+// SetKSMGovernor overrides the KSM governor (e.g. for testing against a synthetic sysfs path).
+func (m *Manager) SetKSMGovernor(gov *ksm.Governor) {
+	m.mu.Lock()
+	m.ksmGov = gov
+	m.mu.Unlock()
+}
+
+// KSMGovernor returns the active KSM governor.
+func (m *Manager) KSMGovernor() *ksm.Governor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ksmGov
 }
 
 // InstanceCounts returns a race-free breakdown of instances by state.
@@ -435,6 +468,9 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		IdleStops:         atomic.LoadUint64(&m.metrics.idleStops),
 		PausedEvictions:   atomic.LoadUint64(&m.metrics.pausedEvictions),
 		QuotaRejections:   atomic.LoadUint64(&m.metrics.quotaRejections),
+		SnapshotsCreated:  atomic.LoadUint64(&m.metrics.snapshotsCreated),
+		SnapshotBranches:  atomic.LoadUint64(&m.metrics.snapshotBranches),
+		CoWSavedBytes:     m.cowSavedBytesTotal(),
 		ActiveConnections: activeConns,
 	}
 }
@@ -486,10 +522,11 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 		Enabled:       inst.Enabled,
 		MemoryMB:      inst.MemoryMB,
 		DiskMB:        inst.DiskMB,
-		VCPUs:         inst.VCPUs,
-		ParentID:      inst.ParentID,
-		Capabilities:  capsJSON,
-		CreatedAt:     inst.CreatedAt,
+		VCPUs:            inst.VCPUs,
+		ParentID:         inst.ParentID,
+		SourceSnapshotID: inst.SourceSnapshotID,
+		Capabilities:     capsJSON,
+		CreatedAt:        inst.CreatedAt,
 	}
 	inst.mu.Unlock()
 
@@ -657,6 +694,13 @@ func WithVCPUs(n int) InstanceOption {
 func WithParentID(id string) InstanceOption {
 	return func(inst *Instance) {
 		inst.ParentID = id
+	}
+}
+
+// WithSourceSnapshotID records the snapshot ID this instance was branched from.
+func WithSourceSnapshotID(id string) InstanceOption {
+	return func(inst *Instance) {
+		inst.SourceSnapshotID = id
 	}
 }
 
@@ -858,6 +902,33 @@ func (m *Manager) finishBootFromStarting(
 		return err
 	}
 
+	// Reuse pre-cloned branch or restored disk/overlay if already present on disk.
+	if rootfsPath == "" && m.cfg != nil && m.cfg.OverlaysDir != "" {
+		ext4Candidate := filepath.Join(m.cfg.OverlaysDir, inst.ID) + ".ext4"
+		dirCandidate := filepath.Join(m.cfg.OverlaysDir, inst.ID)
+		if m.vmm.Capabilities().RootFSType == vmm.RootFSBlockImage {
+			if _, err := os.Stat(ext4Candidate); err == nil {
+				rootfsPath = ext4Candidate
+				inst.mu.Lock()
+				inst.RootfsPath = rootfsPath
+				inst.mu.Unlock()
+			}
+		} else {
+			inst.mu.Lock()
+			srcSnap := inst.SourceSnapshotID
+			parentID := inst.ParentID
+			inst.mu.Unlock()
+			if srcSnap != "" || parentID != "" {
+				if info, err := os.Stat(dirCandidate); err == nil && info.IsDir() {
+					rootfsPath = dirCandidate
+					inst.mu.Lock()
+					inst.RootfsPath = rootfsPath
+					inst.mu.Unlock()
+				}
+			}
+		}
+	}
+
 	// If image ref is set but no rootfs yet, prepare it
 	if imageRef != "" && rootfsPath == "" {
 		log.Printf("instance %s: preparing image rootfs for %s", inst.ID, imageRef)
@@ -916,10 +987,11 @@ func (m *Manager) finishBootFromStarting(
 			Type: m.vmm.Capabilities().RootFSType,
 			Path: rootfsPath,
 		},
-		MemoryMB:      memoryMB,
-		VCPUs:         vcpus,
-		ExposePorts:   exposePortsSnapshot,
-		WorkspacePath: wsPath,
+		MemoryMB:        memoryMB,
+		VCPUs:           vcpus,
+		ExposePorts:     exposePortsSnapshot,
+		WorkspacePath:   wsPath,
+		MergeableMemory: m.cfg != nil && m.cfg.MemoryDedup,
 	}
 
 	handle, err := m.vmm.CreateVM(vmCfg)
@@ -2445,4 +2517,5 @@ func (m *Manager) notifyStateChange(id, state string) {
 	if fn != nil {
 		fn(id, state)
 	}
+	m.reconcileKSM()
 }

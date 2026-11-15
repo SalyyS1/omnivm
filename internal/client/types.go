@@ -10,6 +10,8 @@ type Instance struct {
 	Command           []string               `json:"command"`
 	Handle            string                 `json:"handle,omitempty"`
 	ImageRef          string                 `json:"image_ref,omitempty"`
+	ParentID          string                 `json:"parent_id,omitempty"`
+	SourceSnapshotID  string                 `json:"source_snapshot_id,omitempty"`
 	Kit               string                 `json:"kit,omitempty"`
 	Workspace         string                 `json:"workspace,omitempty"`
 	IdlePolicy        string                 `json:"idle_policy,omitempty"`
@@ -132,16 +134,20 @@ type InstanceCounts struct {
 	Disabled int `json:"disabled"`
 }
 
-// HostResourceMetrics reports live host memory, vCPU, and active VM usage alongside configured ceilings.
+// HostResourceMetrics reports live host memory, vCPU, active VM usage, and KSM deduplication savings alongside configured ceilings.
 type HostResourceMetrics struct {
-	ResidentMemoryMB int `json:"resident_memory_mb"`
-	ActiveMemoryMB   int `json:"active_memory_mb"`
-	PausedMemoryMB   int `json:"paused_memory_mb"`
-	MaxHostMemoryMB  int `json:"max_host_memory_mb"`
-	ActiveVCPUs      int `json:"active_vcpus"`
-	MaxActiveVCPUs   int `json:"max_active_vcpus"`
-	ActiveVMs        int `json:"active_vms"`
-	MaxActiveVMs     int `json:"max_active_vms"`
+	ResidentMemoryMB          int    `json:"resident_memory_mb"`
+	EffectiveResidentMemoryMB int    `json:"effective_resident_memory_mb"`
+	ActiveMemoryMB            int    `json:"active_memory_mb"`
+	PausedMemoryMB            int    `json:"paused_memory_mb"`
+	KSMSavedMemoryMB          int    `json:"ksm_saved_memory_mb"`
+	KSMPagesSharing           uint64 `json:"ksm_pages_sharing"`
+	KSMActive                 bool   `json:"ksm_active"`
+	MaxHostMemoryMB           int    `json:"max_host_memory_mb"`
+	ActiveVCPUs               int    `json:"active_vcpus"`
+	MaxActiveVCPUs            int    `json:"max_active_vcpus"`
+	ActiveVMs                 int    `json:"active_vms"`
+	MaxActiveVMs              int    `json:"max_active_vms"`
 }
 
 // LifecycleMetrics holds scale-to-zero lifecycle counters.
@@ -156,7 +162,66 @@ type LifecycleMetrics struct {
 	IdleStops         uint64 `json:"idle_stops"`
 	PausedEvictions   uint64 `json:"paused_evictions"`
 	QuotaRejections   uint64 `json:"quota_rejections"`
+	SnapshotsCreated  uint64 `json:"snapshots_created"`
+	SnapshotBranches  uint64 `json:"snapshot_branches"`
+	CoWSavedBytes     uint64 `json:"cow_saved_bytes"`
 	ActiveConnections int    `json:"active_connections"`
+}
+
+// Snapshot represents an immutable microVM disk and workspace checkpoint.
+type Snapshot struct {
+	ID               string            `json:"id"`
+	Name             string            `json:"name,omitempty"`
+	SourceInstanceID string            `json:"source_instance_id"`
+	SourceHandle     string            `json:"source_handle,omitempty"`
+	ParentSnapshotID string            `json:"parent_snapshot_id,omitempty"`
+	ImageRef         string            `json:"image_ref,omitempty"`
+	Command          []string          `json:"command"`
+	Env              map[string]string `json:"env,omitempty"`
+	SecretKeys       []string          `json:"secret_keys,omitempty"`
+	ExposePorts      []int             `json:"expose_ports,omitempty"`
+	MemoryMB         int               `json:"memory_mb,omitempty"`
+	VCPUs            int               `json:"vcpus,omitempty"`
+	DiskMB           int               `json:"disk_mb,omitempty"`
+	RootfsPath       string            `json:"rootfs_path"`
+	WorkspacePath    string            `json:"workspace_path,omitempty"`
+	VMMStateDir      string            `json:"vmm_state_dir,omitempty"`
+	LogicalBytes     uint64            `json:"logical_bytes"`
+	CoWSavedBytes    uint64            `json:"cow_saved_bytes"`
+	CreatedAt        string            `json:"created_at"`
+}
+
+// CreateSnapshotRequest configures snapshot creation on an instance.
+type CreateSnapshotRequest struct {
+	Name            string `json:"name,omitempty"`
+	IncludeVMMState bool   `json:"include_vmm_state,omitempty"`
+}
+
+// BranchInstanceRequest configures Copy-on-Write branching from a snapshot or instance.
+type BranchInstanceRequest struct {
+	Handle       string            `json:"handle,omitempty"`
+	Command      []string          `json:"command,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
+	Workspace    string            `json:"workspace,omitempty"`
+	MemoryMB     int               `json:"memory_mb,omitempty"`
+	VCPUs        int               `json:"vcpus,omitempty"`
+	DiskMB       int               `json:"disk_mb,omitempty"`
+	ExcludePorts bool              `json:"exclude_ports,omitempty"`
+	Start        *bool             `json:"start,omitempty"`
+}
+
+// BranchInstanceResponse describes a newly branched instance.
+type BranchInstanceResponse struct {
+	ID               string     `json:"id"`
+	Handle           string     `json:"handle,omitempty"`
+	State            string     `json:"state"`
+	ParentID         string     `json:"parent_id,omitempty"`
+	SourceSnapshotID string     `json:"source_snapshot_id,omitempty"`
+	ImageRef         string     `json:"image_ref,omitempty"`
+	Workspace        string     `json:"workspace,omitempty"`
+	LogicalBytes     uint64     `json:"logical_bytes"`
+	CoWSavedBytes    uint64     `json:"cow_saved_bytes"`
+	Endpoints        []Endpoint `json:"endpoints,omitempty"`
 }
 
 // RouterMetrics holds ingress proxy and probe telemetry.

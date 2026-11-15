@@ -2,20 +2,27 @@ package overlay
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// CopyOverlay implements Overlay using full directory copies.
-// It uses a tar pipe (tar c | tar x) to preserve symlinks, which macOS cp
-// can break for busybox-style rootfs layouts (spec §7.6).
+// CopyOverlay implements Overlay using Copy-on-Write reflinks (FICLONE on XFS,
+// Btrfs, bcachefs) with automatic fallback to sparse extent cloning.
+// Symlinks, directory modes, and busybox-style rootfs layouts are preserved
+// without spawning external tar processes.
 type CopyOverlay struct {
 	baseDir string // directory containing all overlay copies
+
+	overlaysCreated uint64
+	diskClones      uint64
+	reflinkFiles    uint64
+	sparseFiles     uint64
+	logicalBytes    uint64
+	savedBytes      uint64
 }
 
 // NewCopyOverlay creates a CopyOverlay that stores copies under baseDir.
@@ -31,62 +38,57 @@ func (o *CopyOverlay) Create(ctx context.Context, sourceDir, destID string) (str
 		return dest, nil
 	}
 
-	staging := dest + ".tmp"
-
-	// Clean up any leftover staging dir from a previous crash
-	os.RemoveAll(staging)
-
-	if err := os.MkdirAll(staging, 0755); err != nil {
-		return "", fmt.Errorf("create staging dir: %w", err)
-	}
-
-	// Use tar pipe to preserve symlinks and permissions.
-	// tar -C source -cf - . | tar -C staging -xf -
-	tarCreate := exec.CommandContext(ctx, "tar", "-C", sourceDir, "-cf", "-", ".")
-	tarExtract := exec.CommandContext(ctx, "tar", "-C", staging, "-xf", "-")
-
-	pipe, err := tarCreate.StdoutPipe()
+	st, err := CloneTreeCoW(ctx, sourceDir, dest)
 	if err != nil {
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("tar stdout pipe: %w", err)
-	}
-	tarExtract.Stdin = pipe
-
-	if err := tarCreate.Start(); err != nil {
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("start tar create: %w", err)
-	}
-	if err := tarExtract.Start(); err != nil {
-		tarCreate.Process.Kill()
-		tarCreate.Wait()
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("start tar extract: %w", err)
+		return "", err
 	}
 
-	createErr := tarCreate.Wait()
-	extractErr := tarExtract.Wait()
-	if createErr != nil {
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("tar create: %w", createErr)
-	}
-	if extractErr != nil {
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("tar extract: %w", extractErr)
-	}
-
-	// Atomic rename from staging to final destination.
-	// If this fails, the staging dir is cleaned up by the caller or
-	// by CleanStaleTasks on next daemon startup.
-	if err := os.Rename(staging, dest); err != nil {
-		os.RemoveAll(staging)
-		return "", fmt.Errorf("rename staging to final: %w", err)
-	}
-
+	atomic.AddUint64(&o.overlaysCreated, 1)
+	o.recordCloneStats(st)
 	return dest, nil
 }
 
+// CloneDiskImage clones a raw .ext4 disk image into dstPath using FICLONE CoW
+// or sparse hole-preserving extent copy and records the savings in OverlayStats.
+func (o *CopyOverlay) CloneDiskImage(srcPath, dstPath string) (CloneStats, error) {
+	st, err := CloneFileCoW(srcPath, dstPath, 0644)
+	if err != nil {
+		return st, err
+	}
+	atomic.AddUint64(&o.diskClones, 1)
+	o.recordCloneStats(st)
+	return st, nil
+}
+
+// RecordStats incorporates external CloneStats (e.g. workspace or snapshot clones)
+// into the overlay manager's cumulative telemetry counters.
+func (o *CopyOverlay) RecordStats(st CloneStats) {
+	o.recordCloneStats(st)
+}
+
+func (o *CopyOverlay) recordCloneStats(st CloneStats) {
+	atomic.AddUint64(&o.reflinkFiles, st.ReflinkFiles)
+	atomic.AddUint64(&o.sparseFiles, st.SparseFiles)
+	atomic.AddUint64(&o.logicalBytes, st.LogicalBytes)
+	atomic.AddUint64(&o.savedBytes, st.SavedBytes)
+}
+
+// Stats returns cumulative Copy-on-Write and sparse storage telemetry.
+func (o *CopyOverlay) Stats() OverlayStats {
+	return OverlayStats{
+		OverlaysCreated: atomic.LoadUint64(&o.overlaysCreated),
+		DiskClones:      atomic.LoadUint64(&o.diskClones),
+		ReflinkFiles:    atomic.LoadUint64(&o.reflinkFiles),
+		SparseFiles:     atomic.LoadUint64(&o.sparseFiles),
+		LogicalBytes:    atomic.LoadUint64(&o.logicalBytes),
+		SavedBytes:      atomic.LoadUint64(&o.savedBytes),
+	}
+}
+
 func (o *CopyOverlay) Remove(id string) error {
-	return os.RemoveAll(filepath.Join(o.baseDir, id))
+	base := filepath.Join(o.baseDir, id)
+	_ = os.Remove(base + ".ext4")
+	return os.RemoveAll(base)
 }
 
 func (o *CopyOverlay) Path(id string) string {
@@ -95,7 +97,7 @@ func (o *CopyOverlay) Path(id string) string {
 
 // CleanStale removes stale overlay directories on daemon startup:
 //   - task-* directories older than maxAge (crashed task cleanups)
-//   - *.tmp directories of any age (incomplete staging from crashed publishes)
+//   - *.tmp / *.cow.tmp entries of any age (incomplete staging from crashed publishes)
 func (o *CopyOverlay) CleanStale(maxAge time.Duration) {
 	entries, err := os.ReadDir(o.baseDir)
 	if err != nil {
@@ -104,16 +106,17 @@ func (o *CopyOverlay) CleanStale(maxAge time.Duration) {
 
 	cutoff := time.Now().Add(-maxAge)
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
 		path := filepath.Join(o.baseDir, name)
 
-		// Always remove incomplete staging directories
+		// Always remove incomplete staging directories or files
 		if strings.HasSuffix(name, ".tmp") {
-			log.Printf("overlay GC: removing incomplete staging dir %s", name)
+			log.Printf("overlay GC: removing incomplete staging entry %s", name)
 			os.RemoveAll(path)
+			continue
+		}
+
+		if !e.IsDir() {
 			continue
 		}
 

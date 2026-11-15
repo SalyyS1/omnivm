@@ -125,6 +125,62 @@ func (c *Client) UnexposePort(ctx context.Context, idOrHandle string, guestPort 
 	return c.doJSON(ctx, "DELETE", "/v1/instances/"+url.PathEscape(idOrHandle)+"/expose/"+strconv.Itoa(guestPort), nil, nil)
 }
 
+// --- Snapshots & Branching ---
+
+// CreateSnapshot captures a point-in-time CoW snapshot of an instance.
+func (c *Client) CreateSnapshot(ctx context.Context, idOrHandle string, req CreateSnapshotRequest) (*Snapshot, error) {
+	var out Snapshot
+	if err := c.doJSON(ctx, "POST", "/v1/instances/"+url.PathEscape(idOrHandle)+"/snapshots", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListSnapshots lists snapshots, optionally filtered by source instance ID or handle.
+func (c *Client) ListSnapshots(ctx context.Context, instanceFilter string) ([]Snapshot, error) {
+	path := "/v1/snapshots"
+	if instanceFilter != "" {
+		path += "?instance=" + url.QueryEscape(instanceFilter)
+	}
+	var out []Snapshot
+	if err := c.doJSON(ctx, "GET", path, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetSnapshot retrieves a snapshot by ID or unique name.
+func (c *Client) GetSnapshot(ctx context.Context, idOrName string) (*Snapshot, error) {
+	var out Snapshot
+	if err := c.doJSON(ctx, "GET", "/v1/snapshots/"+url.PathEscape(idOrName), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteSnapshot deletes a snapshot by ID or name.
+func (c *Client) DeleteSnapshot(ctx context.Context, idOrName string) error {
+	return c.doJSON(ctx, "DELETE", "/v1/snapshots/"+url.PathEscape(idOrName), nil, nil)
+}
+
+// BranchSnapshot spawns a Copy-on-Write microVM branch from an existing snapshot.
+func (c *Client) BranchSnapshot(ctx context.Context, snapshotIDOrName string, req BranchInstanceRequest) (*BranchInstanceResponse, error) {
+	var out BranchInstanceResponse
+	if err := c.doJSON(ctx, "POST", "/v1/snapshots/"+url.PathEscape(snapshotIDOrName)+"/branch", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// BranchInstance spawns a Copy-on-Write microVM branch directly from a source instance.
+func (c *Client) BranchInstance(ctx context.Context, idOrHandle string, req BranchInstanceRequest) (*BranchInstanceResponse, error) {
+	var out BranchInstanceResponse
+	if err := c.doJSON(ctx, "POST", "/v1/instances/"+url.PathEscape(idOrHandle)+"/branch", req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // --- Exec + Logs ---
 
 // Exec runs a command inside a running instance and collects the output.

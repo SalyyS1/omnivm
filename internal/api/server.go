@@ -79,6 +79,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /v1/instances/{id}/secrets", s.handleUpdateInstanceSecrets)
 	s.mux.HandleFunc("DELETE /v1/instances/{id}", s.handleDeleteInstance)
 	s.mux.HandleFunc("POST /v1/instances/prune", s.handlePruneInstances)
+	s.mux.HandleFunc("POST /v1/instances/{id}/snapshots", s.handleCreateSnapshot)
+	s.mux.HandleFunc("POST /v1/instances/{id}/branch", s.handleBranchInstance)
+
+	// Snapshot routes
+	s.mux.HandleFunc("GET /v1/snapshots", s.handleListSnapshots)
+	s.mux.HandleFunc("GET /v1/snapshots/{id}", s.handleGetSnapshot)
+	s.mux.HandleFunc("DELETE /v1/snapshots/{id}", s.handleDeleteSnapshot)
+	s.mux.HandleFunc("POST /v1/snapshots/{id}/branch", s.handleBranchFromSnapshot)
 
 	// Workspace file access
 	s.mux.HandleFunc("GET /v1/instances/{id}/workspace/tree", s.handleWorkspaceTree)
@@ -199,6 +207,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"pause_resume":          caps.Pause,
 			"persistent_pause":      caps.PersistentPause,
 			"boot_from_disk_layers": true,
+			"snapshot_branching":    true,
+			"cow_overlays":          true,
+			"ksm_dedup":             s.cfg == nil || s.cfg.MemoryDedup,
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,
@@ -461,6 +472,12 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	if snap.ImageRef != "" {
 		resp["image_ref"] = snap.ImageRef
 	}
+	if snap.ParentID != "" {
+		resp["parent_id"] = snap.ParentID
+	}
+	if snap.SourceSnapshotID != "" {
+		resp["source_snapshot_id"] = snap.SourceSnapshotID
+	}
 	if snap.HarnessVersion != "" {
 		resp["harness_version"] = snap.HarnessVersion
 	}
@@ -572,6 +589,12 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		if snap.ImageRef != "" {
 			entry["image_ref"] = snap.ImageRef
+		}
+		if snap.ParentID != "" {
+			entry["parent_id"] = snap.ParentID
+		}
+		if snap.SourceSnapshotID != "" {
+			entry["source_snapshot_id"] = snap.SourceSnapshotID
 		}
 		if !snap.StoppedAt.IsZero() {
 			entry["stopped_at"] = snap.StoppedAt.Format(time.RFC3339)

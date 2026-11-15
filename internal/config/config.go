@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -42,6 +43,9 @@ type Config struct {
 
 	// WorkspacesDir is the directory for workspace volumes.
 	WorkspacesDir string
+
+	// SnapshotsDir is the directory for microVM snapshots and golden ext4 disk caches.
+	SnapshotsDir string
 
 	// LogsDir is the directory for per-instance log files.
 	LogsDir string
@@ -92,6 +96,15 @@ type Config struct {
 	// MaxActiveVMs caps concurrent active (STARTING and RUNNING) instances on
 	// the host. Zero means unlimited.
 	MaxActiveVMs int
+
+	// KSMGovernor controls the Linux Kernel Samepage Merging governor mode:
+	// "off" (read-only sysfs telemetry, default), "auto" (zero-overhead ksmd
+	// activation when >= 2 VMs are resident), or "on". Set via OVM_KSM_GOVERNOR.
+	KSMGovernor string
+
+	// MemoryDedup enables MADV_MERGEABLE anonymous guest RAM hints when
+	// virtiofs shared DMA is not attached. Set via OVM_MEMORY_DEDUP (default true).
+	MemoryDedup bool
 }
 
 // DefaultConfig returns the default configuration.
@@ -109,6 +122,11 @@ func DefaultConfig() *Config {
 		}
 	}
 
+	ksmMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_KSM_GOVERNOR")))
+	if ksmMode == "" {
+		ksmMode = "off"
+	}
+
 	return &Config{
 		DataDir:         filepath.Join(ovmDir, "data"),
 		BinDir:          execDir,
@@ -120,6 +138,7 @@ func DefaultConfig() *Config {
 		ImageCacheDir:   filepath.Join(ovmDir, "data", "images"),
 		OverlaysDir:     filepath.Join(ovmDir, "data", "overlays"),
 		WorkspacesDir:   filepath.Join(ovmDir, "data", "workspaces"),
+		SnapshotsDir:    filepath.Join(ovmDir, "data", "snapshots"),
 		LogsDir:         filepath.Join(ovmDir, "data", "logs"),
 		MasterKeyPath:   filepath.Join(ovmDir, "master.key"),
 		PauseAfterIdle:  60 * time.Second,
@@ -132,6 +151,22 @@ func DefaultConfig() *Config {
 		MaxHostMemoryMB: parseOptionalEnvInt("OVM_MAX_HOST_MEMORY_MB"),
 		MaxActiveVCPUs:  parseOptionalEnvInt("OVM_MAX_ACTIVE_VCPUS"),
 		MaxActiveVMs:    parseOptionalEnvInt("OVM_MAX_ACTIVE_VMS"),
+		KSMGovernor:     ksmMode,
+		MemoryDedup:     parseOptionalEnvBool("OVM_MEMORY_DEDUP", true),
+	}
+}
+
+func parseOptionalEnvBool(key string, defaultVal bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch raw {
+	case "":
+		return defaultVal
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultVal
 	}
 }
 
@@ -207,6 +242,11 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("unsupported network_backend %q: expected auto or tap", c.NetworkBackend)
 	}
+	switch strings.ToLower(strings.TrimSpace(c.KSMGovernor)) {
+	case "", "off", "auto", "on":
+	default:
+		return fmt.Errorf("unsupported ksm_governor %q: expected off, auto, or on", c.KSMGovernor)
+	}
 	if c.DNSServer != "" {
 		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {
 			return fmt.Errorf("invalid dns_server %q: must be an IPv4 address", c.DNSServer)
@@ -227,7 +267,13 @@ func (c *Config) EnsureDirs() error {
 		c.LogsDir,
 		filepath.Dir(c.KernelPath),
 	}
+	if c.SnapshotsDir != "" {
+		dirs = append(dirs, c.SnapshotsDir)
+	}
 	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
 		if err := os.MkdirAll(d, 0700); err != nil {
 			return err
 		}

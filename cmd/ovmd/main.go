@@ -111,6 +111,11 @@ func main() {
 	// Pass secret store, registry, and tether store to lifecycle manager
 	lm.SetSecretStore(ss)
 	lm.SetRegistry(reg)
+	if restoredSnaps, err := lm.RestoreSnapshots(); err != nil {
+		log.Printf("restore snapshots: %v", err)
+	} else if restoredSnaps > 0 {
+		log.Printf("restored %d snapshot(s) from registry", restoredSnaps)
+	}
 
 	ts := tether.NewStore(func(instanceID string, seq int64, data []byte) {
 		if err := reg.SaveTetherFrame(instanceID, seq, data); err != nil {
@@ -249,6 +254,9 @@ func main() {
 			if ri.Workspace != "" {
 				opts = append(opts, lifecycle.WithWorkspace(ri.Workspace))
 			}
+			if ri.AutoWorkspace {
+				opts = append(opts, lifecycle.WithAutoWorkspace())
+			}
 			if len(ri.Env) > 0 {
 				opts = append(opts, lifecycle.WithEnv(ri.Env))
 			}
@@ -267,6 +275,9 @@ func main() {
 			}
 			if ri.ParentID != "" {
 				opts = append(opts, lifecycle.WithParentID(ri.ParentID))
+			}
+			if ri.SourceSnapshotID != "" {
+				opts = append(opts, lifecycle.WithSourceSnapshotID(ri.SourceSnapshotID))
 			}
 			if ri.Capabilities != "" {
 				var caps lifecycle.CapabilityToken

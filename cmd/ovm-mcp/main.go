@@ -358,6 +358,59 @@ var tools = []mcpTool{
 			"required": ["instance"]
 		}`),
 	},
+	{
+		Name:        "snapshot_create",
+		Description: "Capture a point-in-time Copy-on-Write disk and workspace snapshot of a microVM instance. Running instances are transiently paused during cloning and resumed immediately.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"instance":          {"type": "string", "description": "Source instance handle or ID"},
+				"name":              {"type": "string", "description": "Optional unique human-friendly snapshot name (e.g. 'baseline-v1')"},
+				"include_vmm_state": {"type": "boolean", "description": "Capture paused hypervisor state directory when supported by backend"}
+			},
+			"required": ["instance"]
+		}`),
+	},
+	{
+		Name:        "snapshot_list",
+		Description: "List available Copy-on-Write microVM snapshots, optionally filtered by source instance.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"instance": {"type": "string", "description": "Optional source instance handle or ID filter"}
+			}
+		}`),
+	},
+	{
+		Name:        "snapshot_delete",
+		Description: "Delete a microVM snapshot by ID or name and remove its stored disk and workspace artifacts.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"snapshot": {"type": "string", "description": "Snapshot ID or name"}
+			},
+			"required": ["snapshot"]
+		}`),
+	},
+	{
+		Name:        "instance_branch",
+		Description: "Spawn an isolated Copy-on-Write microVM branch from either a snapshot or an existing instance. Clones root disk and workspace via FICLONE reflinks or sparse extents.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"snapshot":      {"type": "string", "description": "Snapshot ID or name to branch from (mutually exclusive with instance)"},
+				"instance":      {"type": "string", "description": "Source instance handle or ID to branch directly from (mutually exclusive with snapshot)"},
+				"name":          {"type": "string", "description": "Optional handle for the new branch instance"},
+				"command":       {"type": "array", "items": {"type": "string"}, "description": "Optional command override for the branch"},
+				"env":           {"type": "object", "additionalProperties": {"type": "string"}, "description": "Optional environment overrides"},
+				"workspace":     {"type": "string", "description": "Optional explicit host workspace directory for the cloned files"},
+				"memory_mb":     {"type": "integer", "description": "Optional guest RAM override in MB"},
+				"vcpus":         {"type": "integer", "description": "Optional vCPU count override"},
+				"exclude_ports": {"type": "boolean", "description": "Do not inherit exposed ports from source"},
+				"start":         {"type": "boolean", "description": "Boot immediately (default true) or register stopped for wake-on-request (false)"}
+			}
+		}`),
+	},
 }
 
 func rawJSON(s string) json.RawMessage {
@@ -1007,6 +1060,132 @@ var toolHandlers = map[string]func(json.RawMessage) *mcpToolResult{
 	"secret_delete":     handleSecretDelete,
 	"tether_send":       handleTetherSend,
 	"tether_read":       handleTetherRead,
+	"snapshot_create":   handleSnapshotCreate,
+	"snapshot_list":     handleSnapshotList,
+	"snapshot_delete":   handleSnapshotDelete,
+	"instance_branch":   handleInstanceBranch,
+}
+
+func handleSnapshotCreate(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Instance        string `json:"instance"`
+		Name            string `json:"name"`
+		IncludeVMMState bool   `json:"include_vmm_state"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil || params.Instance == "" {
+		return errorResult("instance is required")
+	}
+	body := map[string]interface{}{
+		"name":              params.Name,
+		"include_vmm_state": params.IncludeVMMState,
+	}
+	status, data, err := doRequest("POST", "/v1/instances/"+params.Instance+"/snapshots", body)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
+}
+
+func handleSnapshotList(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Instance string `json:"instance"`
+	}
+	if args != nil {
+		_ = json.Unmarshal(args, &params)
+	}
+	path := "/v1/snapshots"
+	if params.Instance != "" {
+		path += "?instance=" + params.Instance
+	}
+	status, data, err := doRequest("GET", path, nil)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
+}
+
+func handleSnapshotDelete(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Snapshot string `json:"snapshot"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil || params.Snapshot == "" {
+		return errorResult("snapshot is required")
+	}
+	status, data, err := doRequest("DELETE", "/v1/snapshots/"+params.Snapshot, nil)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
+}
+
+func handleInstanceBranch(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Snapshot     string            `json:"snapshot"`
+		Instance     string            `json:"instance"`
+		Name         string            `json:"name"`
+		Command      []string          `json:"command"`
+		Env          map[string]string `json:"env"`
+		Workspace    string            `json:"workspace"`
+		MemoryMB     int               `json:"memory_mb"`
+		VCPUs        int               `json:"vcpus"`
+		ExcludePorts bool              `json:"exclude_ports"`
+		Start        *bool             `json:"start"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if (params.Snapshot == "" && params.Instance == "") || (params.Snapshot != "" && params.Instance != "") {
+		return errorResult("specify exactly one of snapshot or instance")
+	}
+
+	body := map[string]interface{}{
+		"exclude_ports": params.ExcludePorts,
+	}
+	if params.Name != "" {
+		body["handle"] = params.Name
+	}
+	if len(params.Command) > 0 {
+		body["command"] = params.Command
+	}
+	if len(params.Env) > 0 {
+		body["env"] = params.Env
+	}
+	if params.Workspace != "" {
+		body["workspace"] = params.Workspace
+	}
+	if params.MemoryMB > 0 {
+		body["memory_mb"] = params.MemoryMB
+	}
+	if params.VCPUs > 0 {
+		body["vcpus"] = params.VCPUs
+	}
+	if params.Start != nil {
+		body["start"] = *params.Start
+	}
+
+	var path string
+	if params.Snapshot != "" {
+		path = "/v1/snapshots/" + params.Snapshot + "/branch"
+	} else {
+		path = "/v1/instances/" + params.Instance + "/branch"
+	}
+	status, data, err := doRequest("POST", path, body)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
 }
 
 // --- Main loop ---

@@ -84,6 +84,27 @@ func (d *DB) migrate() error {
 			seq         INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (instance_id, channel)
 		)`,
+		`CREATE TABLE IF NOT EXISTS snapshots (
+			id                 TEXT PRIMARY KEY,
+			name               TEXT NOT NULL DEFAULT '',
+			source_instance_id TEXT NOT NULL,
+			source_handle      TEXT NOT NULL DEFAULT '',
+			parent_snapshot_id TEXT NOT NULL DEFAULT '',
+			image_ref          TEXT NOT NULL DEFAULT '',
+			command            TEXT NOT NULL DEFAULT '[]',
+			env                TEXT NOT NULL DEFAULT '{}',
+			secret_keys        TEXT NOT NULL DEFAULT '[]',
+			expose_ports       TEXT NOT NULL DEFAULT '[]',
+			memory_mb          INTEGER NOT NULL DEFAULT 0,
+			vcpus              INTEGER NOT NULL DEFAULT 0,
+			disk_mb            INTEGER NOT NULL DEFAULT 0,
+			rootfs_path        TEXT NOT NULL DEFAULT '',
+			workspace_path     TEXT NOT NULL DEFAULT '',
+			vmm_state_dir      TEXT NOT NULL DEFAULT '',
+			logical_bytes      INTEGER NOT NULL DEFAULT 0,
+			cow_saved_bytes    INTEGER NOT NULL DEFAULT 0,
+			created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := d.db.Exec(stmt); err != nil {
@@ -107,6 +128,7 @@ func (d *DB) migrate() error {
 		`ALTER TABLE instances ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN auto_workspace INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE instances ADD COLUMN disk_mb INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE instances ADD COLUMN source_snapshot_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range migrations {
 		d.db.Exec(stmt)

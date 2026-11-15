@@ -97,9 +97,17 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 
 	const bytesPerMB = int64(1024 * 1024)
 	writeGauge("omnivm_host_resident_memory_bytes", "Aggregate guest RAM in bytes across starting, running, and warm paused microVMs.", int64(resMetrics.ResidentMemoryMB)*bytesPerMB)
+	writeGauge("omnivm_host_effective_resident_memory_bytes", "Effective host guest RAM footprint in bytes after Linux KSM page deduplication.", int64(resMetrics.EffectiveResidentMemoryMB)*bytesPerMB)
 	writeGauge("omnivm_host_active_memory_bytes", "Aggregate guest RAM in bytes across starting and running microVMs.", int64(resMetrics.ActiveMemoryMB)*bytesPerMB)
 	writeGauge("omnivm_host_paused_memory_bytes", "Aggregate guest RAM in bytes across warm standby paused microVMs.", int64(resMetrics.PausedMemoryMB)*bytesPerMB)
 	writeGauge("omnivm_host_quota_memory_bytes", "Configured host guest memory ceiling in bytes (0 when unlimited).", int64(resMetrics.MaxHostMemoryMB)*bytesPerMB)
+	writeGauge("omnivm_ksm_saved_bytes", "Physical host RAM bytes currently deduplicated across microVMs via Linux KSM.", int64(resMetrics.KSMSavedMemoryMB)*bytesPerMB)
+	writeGauge("omnivm_ksm_pages_sharing", "Number of duplicate guest memory pages currently merged by Linux KSM.", int64(resMetrics.KSMPagesSharing))
+	ksmActiveVal := int64(0)
+	if resMetrics.KSMActive {
+		ksmActiveVal = 1
+	}
+	writeGauge("omnivm_ksm_active", "Whether the Linux ksmd page scanner is currently active (1=scanning, 0=paused).", ksmActiveVal)
 	writeGauge("omnivm_host_active_vcpus", "Aggregate virtual CPUs assigned to starting and running microVMs.", int64(resMetrics.ActiveVCPUs))
 	writeGauge("omnivm_host_quota_vcpus", "Configured active virtual CPU admission ceiling (0 when unlimited).", int64(resMetrics.MaxActiveVCPUs))
 	writeGauge("omnivm_host_active_vms", "Number of concurrently starting or running microVMs.", int64(resMetrics.ActiveVMs))
@@ -115,6 +123,9 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 	writeCounter("omnivm_lifecycle_idle_stops", "Total transitions from PAUSED to STOPPED by the extended idle reaper.", lmMetrics.IdleStops)
 	writeCounter("omnivm_lifecycle_paused_evictions", "Total LRU paused microVMs evicted to reclaim host memory for incoming wakes.", lmMetrics.PausedEvictions)
 	writeCounter("omnivm_lifecycle_quota_rejections", "Total instance starts or resumes rejected by host resource admission quotas.", lmMetrics.QuotaRejections)
+	writeCounter("omnivm_lifecycle_snapshots_created", "Total microVM disk and workspace snapshots created.", lmMetrics.SnapshotsCreated)
+	writeCounter("omnivm_lifecycle_snapshot_branches", "Total Copy-on-Write microVM branches spawned from snapshots or live instances.", lmMetrics.SnapshotBranches)
+	writeGauge("omnivm_storage_cow_saved_bytes", "Cumulative host disk bytes saved by Copy-on-Write reflinks and sparse extent cloning.", int64(lmMetrics.CoWSavedBytes))
 	writeGauge("omnivm_lifecycle_active_connections", "Current active HTTP and TCP connections tracked across instances.", int64(lmMetrics.ActiveConnections))
 
 	writeGauge("omnivm_router_active_port_proxies", "Number of bound host L4/HTTP port proxy listeners.", int64(rtrMetrics.ActivePortProxies))

@@ -33,16 +33,20 @@ func (e *QuotaError) Unwrap() error {
 	return ErrQuotaExceeded
 }
 
-// HostResourceMetrics reports live host memory, vCPU, and active VM usage alongside configured ceilings.
+// HostResourceMetrics reports live host memory, vCPU, active VM usage, and KSM deduplication savings alongside configured ceilings.
 type HostResourceMetrics struct {
-	ResidentMemoryMB int `json:"resident_memory_mb"`
-	ActiveMemoryMB   int `json:"active_memory_mb"`
-	PausedMemoryMB   int `json:"paused_memory_mb"`
-	MaxHostMemoryMB  int `json:"max_host_memory_mb"`
-	ActiveVCPUs      int `json:"active_vcpus"`
-	MaxActiveVCPUs   int `json:"max_active_vcpus"`
-	ActiveVMs        int `json:"active_vms"`
-	MaxActiveVMs     int `json:"max_active_vms"`
+	ResidentMemoryMB          int    `json:"resident_memory_mb"`
+	EffectiveResidentMemoryMB int    `json:"effective_resident_memory_mb"`
+	ActiveMemoryMB            int    `json:"active_memory_mb"`
+	PausedMemoryMB            int    `json:"paused_memory_mb"`
+	KSMSavedMemoryMB          int    `json:"ksm_saved_memory_mb"`
+	KSMPagesSharing           uint64 `json:"ksm_pages_sharing"`
+	KSMActive                 bool   `json:"ksm_active"`
+	MaxHostMemoryMB           int    `json:"max_host_memory_mb"`
+	ActiveVCPUs               int    `json:"active_vcpus"`
+	MaxActiveVCPUs            int    `json:"max_active_vcpus"`
+	ActiveVMs                 int    `json:"active_vms"`
+	MaxActiveVMs              int    `json:"max_active_vms"`
 }
 
 func (m *Manager) effectiveResourcesLocked(inst *Instance) (memMB int, vcpus int) {
@@ -96,7 +100,42 @@ func (m *Manager) HostResources() HostResourceMetrics {
 			out.ResidentMemoryMB += memMB
 		}
 	}
+
+	gov := m.KSMGovernor()
+	if gov != nil {
+		km := gov.ReadMetrics()
+		out.KSMSavedMemoryMB = km.SavedMB
+		out.KSMPagesSharing = km.PagesSharing
+		out.KSMActive = km.Active
+	}
+	effective := out.ResidentMemoryMB - out.KSMSavedMemoryMB
+	if effective < 0 {
+		effective = 0
+	}
+	out.EffectiveResidentMemoryMB = effective
 	return out
+}
+
+func (m *Manager) reconcileKSM() {
+	gov := m.KSMGovernor()
+	if gov == nil {
+		return
+	}
+	residentVMs := 0
+	for _, inst := range m.ListInstances() {
+		inst.mu.Lock()
+		state := inst.State
+		resuming := inst.resuming
+		reaping := inst.reaping
+		inst.mu.Unlock()
+		if reaping {
+			continue
+		}
+		if state == StateStarting || state == StateRunning || state == StatePaused || resuming {
+			residentVMs++
+		}
+	}
+	gov.Reconcile(residentVMs)
 }
 
 type pausedEvictionCandidate struct {

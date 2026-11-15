@@ -123,6 +123,10 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "negative_max_active_vms",
 			mutate: func(c *Config) { c.MaxActiveVMs = -1 },
 		},
+		{
+			name:   "invalid_ksm_governor",
+			mutate: func(c *Config) { c.KSMGovernor = "aggressive" },
+		},
 	}
 
 	for _, tc := range tests {
@@ -145,6 +149,8 @@ func TestConfigValidate_EdgeValidCases(t *testing.T) {
 	cfg.MaxDiskMB = 512
 	cfg.NetworkBackend = "tap"
 	cfg.DNSServer = ""
+	cfg.KSMGovernor = "auto"
+	cfg.MemoryDedup = false
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected valid edge config, got error: %v", err)
 	}

@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/google/go-containerregistry v0.20.7
 	github.com/klauspost/compress v1.18.3
+	golang.org/x/sys v0.40.0
 	modernc.org/sqlite v1.46.1
 )
 
@@ -26,7 +27,6 @@ require (
 	github.com/vbatts/tar-split v0.12.2 // indirect
 	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
 	gotest.tools/v3 v3.4.0 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

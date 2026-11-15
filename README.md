@@ -58,6 +58,15 @@ After a cold boot or warm resume, the VM kernel may be up milliseconds before th
 - **Context-Aware TCP Probing (`router.ProbeTCP`)**: Uses bounded exponential backoff (`20ms` up to `200ms`) with request-context cancellation and a non-destructive `recvfrom(..., MSG_PEEK | MSG_DONTWAIT)` socket check to reject immediate-EOF proxy accepts before relaying client bytes.
 - **Single-Byte Vsock Handshake (`router.ProbeVsock`)**: Validates guest `virtio-vsock` readiness through Cloud Hypervisor's host Unix multiplexer socket (`CONNECT <port>\n` -> `OK <local_port>\n`), reading the response header one byte at a time so zero guest application payload bytes are ever consumed by a buffered reader.
 
+## Snapshot Branching, Copy-on-Write Overlays, and KSM Memory Deduplication
+
+AI evaluation harnesses and speculative code-execution pipelines frequently fork multiple isolated sandboxes from a shared golden environment. OmniVM `v0.4.0` eliminates full-disk copies and duplicate guest RAM across branches:
+
+- **Point-in-Time Quiescent Snapshots (`CreateSnapshot`)**: Captures an instance's `ext4` root block device, `/workspace` directory tree, and optional Cloud Hypervisor `vm.snapshot` state under an exclusive transition freeze (`freezeInstanceForClone`). Running microVMs are transiently paused during cloning and resumed immediately without dropping bound host ports.
+- **Copy-on-Write Reflink and Sparse Extent Cloning (`overlay.CloneFileCoW` / `CloneTreeCoW`)**: On reflink-capable Linux filesystems (`XFS`, `Btrfs`, `bcachefs`), root disks and workspace files are cloned in $O(1)$ time via the `FICLONE` `ioctl`, sharing physical extents Copy-on-Write until mutated. On `ext4` or `tmpfs`, OmniVM automatically falls back to 64 KiB sparse extent scanning (`Seek` hole preservation), keeping sparse `.ext4` block images thin on disk (`cow_saved_bytes`).
+- **Speculative MicroVM Branching (`BranchInstance`)**: Branches can be spawned from a named snapshot (`POST /v1/snapshots/{id}/branch` / `ovm snapshot branch`) or directly from a live/paused/stopped instance (`POST /v1/instances/{id}/branch` / `ovm instance branch`), with optional command, environment, resource, and `start=false` (0 MB RAM lazy wake-on-request) overrides. Also exposed to LLM agents via `ovm-mcp` tools (`snapshot_create`, `snapshot_list`, `snapshot_delete`, `instance_branch`).
+- **Zero-Overhead Memory Deduplication (`internal/ksm` + `MADV_MERGEABLE`)**: When `OVM_MEMORY_DEDUP=true` (default) and `virtiofs` shared DMA is not attached, Cloud Hypervisor marks anonymous guest RAM `mergeable=on` (`MADV_MERGEABLE`). The adaptive KSM governor (`OVM_KSM_GOVERNOR=auto`) keeps `ksmd` paused (`run=0`, 0% background CPU overhead while retaining already-merged CoW pages) whenever fewer than 2 microVMs hold resident RAM, activates `ksmd` (`run=1`, `50ms` ramp) when 2 or more microVMs are resident, and backs off to steady-state (`200ms`) once page sharing stabilizes.
+
 ## Quick Start
 
 ### Prerequisites
@@ -120,7 +129,24 @@ Secrets are encrypted at rest with AES-256-GCM (`~/.omnivm/master.key`) and are 
 ./bin/ovm instance start --name agent --secret OPENAI_API_KEY -- python3 /workspace/agent.py
 ```
 
-### 4. Structured JSON, Prometheus, and OpenMetrics Telemetry
+### 4. Snapshot Checkpointing and Speculative MicroVM Branching
+
+Checkpoint a running or paused sandbox and fork isolated Copy-on-Write branches for parallel agent rollouts:
+
+```bash
+# Capture a named Copy-on-Write checkpoint of rootfs + /workspace
+./bin/ovm snapshot create agent --name baseline-v1
+
+# Spawn two isolated CoW branches from the checkpoint
+./bin/ovm snapshot branch baseline-v1 --name rollout-a -- python3 /workspace/agent.py --strategy=a
+./bin/ovm snapshot branch baseline-v1 --name rollout-b --no-start -- python3 /workspace/agent.py --strategy=b
+
+# Or fork directly from a live/paused instance without an intermediate named snapshot
+./bin/ovm instance branch agent --name quick-fork --exclude-ports
+./bin/ovm snapshot list
+```
+
+### 5. Structured JSON, Prometheus, and OpenMetrics Telemetry
 
 Both the CLI and Unix-socket API expose structured JSON status alongside Prometheus `0.0.4` and OpenMetrics `1.0.0` exposition:
 
@@ -145,26 +171,30 @@ Example `GET /v1/metrics` response:
 
 ```json
 {
-  "timestamp": "2026-11-15T02:00:00Z",
-  "version": "v0.3.0",
+  "timestamp": "2026-11-15T08:00:00Z",
+  "version": "v0.4.0",
   "backend": "cloud-hypervisor",
   "uptime_seconds": 3420,
   "instances": {
     "total": 4,
-    "running": 1,
+    "running": 2,
     "starting": 0,
     "paused": 1,
-    "stopped": 2,
+    "stopped": 1,
     "disabled": 0
   },
   "resources": {
-    "resident_memory_mb": 1024,
-    "active_memory_mb": 512,
+    "resident_memory_mb": 1536,
+    "effective_resident_memory_mb": 912,
+    "active_memory_mb": 1024,
     "paused_memory_mb": 512,
+    "ksm_saved_memory_mb": 624,
+    "ksm_pages_sharing": 159744,
+    "ksm_active": true,
     "max_host_memory_mb": 4096,
-    "active_vcpus": 2,
+    "active_vcpus": 3,
     "max_active_vcpus": 8,
-    "active_vms": 1,
+    "active_vms": 2,
     "max_active_vms": 8
   },
   "lifecycle": {
@@ -178,6 +208,9 @@ Example `GET /v1/metrics` response:
     "idle_stops": 5,
     "paused_evictions": 3,
     "quota_rejections": 0,
+    "snapshots_created": 2,
+    "snapshot_branches": 5,
+    "cow_saved_bytes": 3221225472,
     "active_connections": 3
   },
   "router": {
@@ -192,10 +225,12 @@ Example `GET /v1/metrics` response:
 
 Key REST endpoints:
 
-- `GET /v1/status` - Daemon health, backend capabilities, instance counts, host resource gauges, and lifecycle summary
-- `GET /metrics` - Prometheus `0.0.4` text exposition (`omnivm_instances`, `omnivm_host_*`, `omnivm_lifecycle_*`, `omnivm_router_*`)
+- `GET /v1/status` - Daemon health, backend capabilities (`snapshot_branching`, `cow_overlays`, `ksm_dedup`), instance counts, host resource gauges, and lifecycle summary
+- `GET /metrics` - Prometheus `0.0.4` text exposition (`omnivm_instances`, `omnivm_host_*`, `omnivm_ksm_*`, `omnivm_storage_cow_saved_bytes`, `omnivm_lifecycle_*`, `omnivm_router_*`)
 - `GET /v1/metrics` - Timestamped JSON telemetry (supports `?format=prometheus` and `Accept: application/openmetrics-text`)
 - `POST /v1/instances` / `GET /v1/instances` / `DELETE /v1/instances/{id}` - Instance lifecycle CRUD
+- `POST /v1/instances/{id}/snapshots` / `GET /v1/snapshots` / `DELETE /v1/snapshots/{id}` - Quiescent Copy-on-Write microVM snapshot management
+- `POST /v1/snapshots/{id}/branch` / `POST /v1/instances/{id}/branch` - Speculative Copy-on-Write microVM branching with resource and command overrides
 - `POST /v1/instances/{id}/exec` - Wake-on-exec command runner streaming NDJSON stdout/stderr + exit code
 - `POST /v1/instances/{id}/expose` / `DELETE /v1/instances/{id}/expose/{guest_port}` - Dynamic L4/HTTP port publishing
 - `POST /v1/instances/{id}/tether` / `GET /v1/instances/{id}/tether/stream` - Host-guest agent frame bus

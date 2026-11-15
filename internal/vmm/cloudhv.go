@@ -306,10 +306,7 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 			"boot_vcpus": cfg.VCPUs,
 			"max_vcpus":  cfg.VCPUs,
 		},
-		"memory": map[string]interface{}{
-			"size":   memBytes,
-			"shared": true,
-		},
+		"memory": buildCHMemoryPayload(memBytes, cfg.WorkspacePath, cfg.MergeableMemory),
 		// The root disk is always a raw ext4 image. Cloud Hypervisor requires
 		// an explicit image type instead of probing the file format.
 		"disks": []map[string]interface{}{
@@ -412,6 +409,51 @@ func (v *CloudHypervisorVMM) ResumeVM(h Handle) error {
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("vm.resume returned %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// buildCHMemoryPayload constructs Cloud Hypervisor's MemoryConfig.
+// virtiofsd requires MAP_SHARED guest memory for vhost-user DMA, and Linux
+// rejects MADV_MERGEABLE on MAP_SHARED shmem; therefore mergeable anonymous
+// memory is enabled only when WorkspacePath is empty.
+func buildCHMemoryPayload(memBytes int64, workspacePath string, mergeable bool) map[string]interface{} {
+	if workspacePath == "" && mergeable {
+		return map[string]interface{}{
+			"size":      memBytes,
+			"shared":    false,
+			"mergeable": true,
+		}
+	}
+	return map[string]interface{}{
+		"size":   memBytes,
+		"shared": true,
+	}
+}
+
+// SnapshotVM captures paused Cloud Hypervisor state into destDir via PUT /api/v1/vm.snapshot.
+func (v *CloudHypervisorVMM) SnapshotVM(h Handle, destDir string) error {
+	v.mu.Lock()
+	inst, ok := v.instances[h.ID]
+	v.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("vm %s not found", h.ID)
+	}
+	if err := os.MkdirAll(destDir, 0700); err != nil {
+		return fmt.Errorf("mkdir snapshot dir: %w", err)
+	}
+
+	client := newCHClient(inst.apiSocket)
+	resp, err := client.put("/api/v1/vm.snapshot", map[string]interface{}{
+		"destination_url": "file://" + destDir,
+	})
+	if err != nil {
+		return fmt.Errorf("vm.snapshot: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("vm.snapshot returned %d: %s", resp.StatusCode, body)
 	}
 	return nil
 }

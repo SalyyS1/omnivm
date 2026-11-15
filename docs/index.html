@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.3.0 | Scale-to-Zero KVM MicroVM Architecture & Quota Explorer</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, single-flight wake coalescing, LRU paused eviction, and Prometheus/OpenMetrics simulator for OmniVM." />
+  <title>OmniVM v0.4.0 | Scale-to-Zero KVM MicroVM, CoW Branching &amp; KSM Dedup Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, Copy-on-Write microVM snapshot branching, adaptive Linux KSM memory deduplication, single-flight wake coalescing, and Prometheus/OpenMetrics simulator for OmniVM v0.4.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -30,7 +30,7 @@
       line-height: 1.55;
     }
     .wrap {
-      max-width: 1220px;
+      max-width: 1260px;
       margin: 0 auto;
       padding: 32px 20px 64px;
     }
@@ -63,7 +63,7 @@
     .subtitle {
       margin: 0;
       color: var(--muted);
-      max-width: 760px;
+      max-width: 790px;
       font-size: 15px;
     }
     .nav-links {
@@ -93,18 +93,24 @@
       color: #bae6fd;
       font-weight: 600;
     }
+    .btn-purple {
+      background: rgba(168, 85, 247, 0.14);
+      border-color: rgba(168, 85, 247, 0.45);
+      color: #e9d5ff;
+      font-weight: 600;
+    }
     .btn-sm {
-      padding: 4px 9px;
-      font-size: 12px;
+      padding: 4px 8px;
+      font-size: 11px;
       font-family: var(--mono);
     }
     .grid-2 {
       display: grid;
-      grid-template-columns: 1.25fr 1fr;
+      grid-template-columns: 1.3fr 1fr;
       gap: 20px;
       margin-bottom: 24px;
     }
-    @media (max-width: 960px) {
+    @media (max-width: 980px) {
       .grid-2 { grid-template-columns: 1fr; }
     }
     .card {
@@ -122,21 +128,21 @@
     }
     .controls-row {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
       margin-bottom: 16px;
     }
-    @media (max-width: 640px) {
-      .controls-row { grid-template-columns: 1fr; }
+    @media (max-width: 680px) {
+      .controls-row { grid-template-columns: 1fr 1fr; }
     }
     .field label {
       display: block;
-      font-size: 12px;
+      font-size: 11px;
       color: var(--muted);
       margin-bottom: 4px;
       font-family: var(--mono);
     }
-    .field input {
+    .field input, .field select {
       width: 100%;
       background: var(--panel-alt);
       border: 1px solid var(--border);
@@ -153,7 +159,7 @@
       margin-bottom: 16px;
     }
     .meter-group {
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
     .meter-label {
       display: flex;
@@ -173,20 +179,21 @@
     }
     .bar-active { background: var(--green); height: 100%; transition: width 0.2s; }
     .bar-paused { background: var(--amber); height: 100%; transition: width 0.2s; }
+    .bar-ksm    { background: var(--purple); height: 100%; transition: width 0.2s; }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 13px;
+      font-size: 12.5px;
     }
     th, td {
       text-align: left;
-      padding: 8px 6px;
+      padding: 8px 5px;
       border-bottom: 1px solid var(--border);
     }
     th {
       color: var(--muted);
       font-weight: 500;
-      font-size: 12px;
+      font-size: 11px;
       font-family: var(--mono);
     }
     .pill {
@@ -194,32 +201,46 @@
       padding: 2px 8px;
       border-radius: 999px;
       font-family: var(--mono);
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 600;
     }
     .state-running { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
     .state-paused  { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
     .state-stopped { background: rgba(156, 163, 175, 0.12); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.25); }
+    .lineage-tag {
+      display: inline-block;
+      margin-left: 5px;
+      padding: 1px 6px;
+      font-size: 10px;
+      border-radius: 4px;
+      font-family: var(--mono);
+      background: rgba(168, 85, 247, 0.14);
+      color: #d8b4fe;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
       margin-bottom: 14px;
+    }
+    @media (max-width: 640px) {
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     }
     .kpi {
       background: var(--panel-alt);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 10px;
+      padding: 9px 10px;
     }
     .kpi .k-val {
       font-family: var(--mono);
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
       color: var(--text);
     }
     .kpi .k-lbl {
-      font-size: 11px;
+      font-size: 10.5px;
       color: var(--muted);
       font-family: var(--mono);
     }
@@ -249,9 +270,9 @@
       border-radius: 8px;
       padding: 12px;
       font-family: var(--mono);
-      font-size: 12px;
+      font-size: 11.5px;
       overflow: auto;
-      max-height: 360px;
+      max-height: 380px;
       color: #cbd5e1;
     }
     .event-log {
@@ -261,12 +282,13 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 10px 12px;
-      height: 155px;
+      height: 160px;
       overflow-y: auto;
       margin-top: 14px;
     }
     .ev-line { margin-bottom: 4px; }
     .ev-ok { color: #4ade80; }
+    .ev-cow { color: #d8b4fe; }
     .ev-evict { color: #fbbf24; }
     .ev-err { color: #f87171; }
     .arch-card {
@@ -285,15 +307,15 @@
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.3.0 Control Plane</span>
-        <h1>Scale-to-Zero KVM MicroVM Simulator &amp; Telemetry Explorer</h1>
+        <span class="badge">OmniVM v0.4.0 Control Plane</span>
+        <h1>Scale-to-Zero KVM MicroVM, CoW Branching &amp; KSM Simulator</h1>
         <p class="subtitle">
-          Explore single-flight request coalescing, host RAM/vCPU admission quotas, LRU warm-paused microVM eviction, and live Prometheus / OpenMetrics exposition.
+          Explore Copy-on-Write snapshot branching (FICLONE reflinks + sparse extents), zero-overhead adaptive Linux KSM page deduplication, single-flight wake coalescing, LRU paused eviction, and Prometheus / OpenMetrics telemetry.
         </p>
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.3.0">Release v0.3.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.4.0">Release v0.4.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -301,26 +323,35 @@
     <div class="grid-2">
       <div class="card">
         <h2>
-          <span>Host Admission Policy &amp; MicroVM Fleet</span>
+          <span>Host Admission Policy, KSM Governor &amp; MicroVM Fleet</span>
           <button class="btn btn-sm" id="btn-reset">Reset Fleet</button>
         </h2>
 
         <div class="controls-row">
           <div class="field">
-            <label for="q-mem">max_host_memory_mb (0=unlim)</label>
-            <input id="q-mem" type="number" min="0" step="256" value="1024" />
+            <label for="q-mem">max_host_memory_mb</label>
+            <input id="q-mem" type="number" min="0" step="256" value="2048" />
           </div>
           <div class="field">
-            <label for="q-cpu">max_active_vcpus (0=unlim)</label>
-            <input id="q-cpu" type="number" min="0" step="1" value="4" />
+            <label for="q-cpu">max_active_vcpus</label>
+            <input id="q-cpu" type="number" min="0" step="1" value="6" />
           </div>
           <div class="field">
-            <label for="q-vms">max_active_vms (0=unlim)</label>
-            <input id="q-vms" type="number" min="0" step="1" value="3" />
+            <label for="q-vms">max_active_vms</label>
+            <input id="q-vms" type="number" min="0" step="1" value="4" />
+          </div>
+          <div class="field">
+            <label for="q-ksm">ksm_governor</label>
+            <select id="q-ksm">
+              <option value="auto" selected>auto (ksmd >= 2 VMs)</option>
+              <option value="on">on (always scan)</option>
+              <option value="off">off (read-only)</option>
+            </select>
           </div>
         </div>
 
         <div class="scenarios">
+          <button class="btn btn-purple btn-sm" id="sc-branch">Simulate CoW Snapshot + 3x Branch + KSM Dedup</button>
           <button class="btn btn-primary btn-sm" id="sc-coalesce">Simulate 24x Cold-Wake Storm</button>
           <button class="btn btn-sm" id="sc-lru">Simulate LRU Paused Eviction</button>
           <button class="btn btn-sm" id="sc-429">Simulate Quota HTTP 429 Guard</button>
@@ -328,8 +359,8 @@
 
         <div class="meter-group">
           <div class="meter-label">
-            <span>Host Resident RAM (Green=Active, Amber=Warm Paused)</span>
-            <span id="lbl-mem">0 / 1024 MB</span>
+            <span>Host Resident RAM (Green=Active, Amber=Paused)</span>
+            <span id="lbl-mem">0 / 2048 MB</span>
           </div>
           <div class="meter-track">
             <div class="bar-active" id="bar-mem-active" style="width:0%"></div>
@@ -339,18 +370,18 @@
 
         <div class="meter-group">
           <div class="meter-label">
-            <span>Active Scheduled vCPUs</span>
-            <span id="lbl-cpu">0 / 4 vCPUs</span>
+            <span>Effective Physical RAM after Linux KSM Deduplication</span>
+            <span id="lbl-ksm">0 MB effective (0 MB saved, ksmd=paused)</span>
           </div>
           <div class="meter-track">
-            <div class="bar-active" id="bar-cpu" style="width:0%"></div>
+            <div class="bar-ksm" id="bar-ksm" style="width:0%"></div>
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>Handle</th>
+              <th>Handle &amp; Lineage</th>
               <th>Profile</th>
               <th>State</th>
               <th>Last Active</th>
@@ -375,9 +406,11 @@
 
         <div class="kpi-grid">
           <div class="kpi"><div class="k-val" id="k-cold">0</div><div class="k-lbl">cold_starts</div></div>
-          <div class="kpi"><div class="k-val" id="k-warm">0</div><div class="k-lbl">warm_resumes</div></div>
           <div class="kpi"><div class="k-val" id="k-coal">0</div><div class="k-lbl">coalesced_wakes</div></div>
-          <div class="kpi"><div class="k-val" id="k-pause">0</div><div class="k-lbl">idle_pauses</div></div>
+          <div class="kpi"><div class="k-val" id="k-snap">0</div><div class="k-lbl">snapshots_created</div></div>
+          <div class="kpi"><div class="k-val" id="k-br">0</div><div class="k-lbl">snapshot_branches</div></div>
+          <div class="kpi"><div class="k-val" id="k-cow">0 MiB</div><div class="k-lbl">cow_saved_bytes</div></div>
+          <div class="kpi"><div class="k-val" id="k-ksm">0 MB</div><div class="k-lbl">ksm_saved_mem</div></div>
           <div class="kpi"><div class="k-val" id="k-evict">0</div><div class="k-lbl">paused_evictions</div></div>
           <div class="kpi"><div class="k-val" id="k-rej">0</div><div class="k-lbl">quota_rejections</div></div>
         </div>
@@ -388,8 +421,8 @@
 
     <div class="card arch-card">
       <h2>
-        <span>OmniVM Hardware Virtualization &amp; Ingress Architecture</span>
-        <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">Cloud Hypervisor + Linux KVM + virtio-vsock</span>
+        <span>OmniVM Hardware Virtualization, CoW Storage &amp; Ingress Architecture</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">Cloud Hypervisor + Linux KVM + FICLONE + KSM + virtio-vsock</span>
       </h2>
       <img src="assets/architecture.svg" alt="OmniVM Architecture Diagram" />
     </div>
@@ -398,16 +431,18 @@
   <script>
     (function () {
       const initialFleet = () => [
-        { id: "inst-1", handle: "api-gateway",    mem: 256, cpu: 1, state: "stopped", tick: 0 },
-        { id: "inst-2", handle: "code-runner-py", mem: 512, cpu: 2, state: "stopped", tick: 0 },
-        { id: "inst-3", handle: "node-worker",    mem: 512, cpu: 1, state: "stopped", tick: 0 },
-        { id: "inst-4", handle: "sql-analyst",    mem: 256, cpu: 1, state: "stopped", tick: 0 },
-        { id: "inst-5", handle: "agent-sandbox",  mem: 512, cpu: 2, state: "stopped", tick: 0 }
+        { id: "inst-1", handle: "api-gateway",    mem: 256, cpu: 1, diskMB: 512, state: "stopped", tick: 0, lineage: "" },
+        { id: "inst-2", handle: "agent-sandbox",  mem: 512, cpu: 1, diskMB: 768, state: "stopped", tick: 0, lineage: "" },
+        { id: "inst-3", handle: "code-runner-py", mem: 512, cpu: 2, diskMB: 512, state: "stopped", tick: 0, lineage: "" },
+        { id: "inst-4", handle: "sql-analyst",    mem: 256, cpu: 1, diskMB: 512, state: "stopped", tick: 0, lineage: "" }
       ];
 
       let clock = 1;
+      let branchSeq = 1;
+      let snapSeq = 1;
       let format = "prom";
       let fleet = initialFleet();
+      let snapshots = [];
       let counters = {
         cold_starts: 0,
         warm_resumes: 0,
@@ -416,12 +451,16 @@
         idle_stops: 0,
         paused_evictions: 0,
         quota_rejections: 0,
+        snapshots_created: 0,
+        snapshot_branches: 0,
+        cow_saved_bytes: 0,
         http_requests: 0
       };
 
       const elMem = document.getElementById("q-mem");
       const elCpu = document.getElementById("q-cpu");
       const elVms = document.getElementById("q-vms");
+      const elKsm = document.getElementById("q-ksm");
       const logBox = document.getElementById("event-log");
 
       function logEvent(cls, msg) {
@@ -435,39 +474,80 @@
         return {
           maxMem: Math.max(0, parseInt(elMem.value || "0", 10)),
           maxCpu: Math.max(0, parseInt(elCpu.value || "0", 10)),
-          maxVms: Math.max(0, parseInt(elVms.value || "0", 10))
+          maxVms: Math.max(0, parseInt(elVms.value || "0", 10)),
+          ksmMode: elKsm.value || "auto"
         };
       }
 
       function computeUsage(excludeId) {
-        let activeMem = 0, pausedMem = 0, activeCpu = 0, activeVms = 0;
+        let activeMem = 0, pausedMem = 0, activeCpu = 0, activeVms = 0, residentVms = 0;
         const pausedCandidates = [];
+        const lineageCounts = {};
         for (const vm of fleet) {
           if (vm.id === excludeId) continue;
           if (vm.state === "running") {
             activeMem += vm.mem;
             activeCpu += vm.cpu;
             activeVms += 1;
+            residentVms += 1;
           } else if (vm.state === "paused") {
             pausedMem += vm.mem;
             pausedCandidates.push(vm);
+            residentVms += 1;
+          }
+          if (vm.state === "running" || vm.state === "paused") {
+            const group = vm.rootFamily || vm.id;
+            lineageCounts[group] = (lineageCounts[group] || 0) + 1;
           }
         }
         pausedCandidates.sort((a, b) => a.tick - b.tick);
-        return { activeMem, pausedMem, residentMem: activeMem + pausedMem, activeCpu, activeVms, pausedCandidates };
+
+        const residentMem = activeMem + pausedMem;
+        const ksmMode = elKsm.value || "auto";
+        const ksmActive = ksmMode === "on" ? residentVms >= 1 : (ksmMode === "auto" ? residentVms >= 2 : false);
+        let ksmSavedMB = 0;
+        if (ksmActive && residentVms >= 2) {
+          // Branched sibling microVMs share ~62% of anonymous kernel + Python/Node pages; unrelated Alpine VMs share ~28%.
+          for (const vm of fleet) {
+            if (vm.id === excludeId || (vm.state !== "running" && vm.state !== "paused")) continue;
+            const group = vm.rootFamily || vm.id;
+            if ((lineageCounts[group] || 0) >= 2 && vm.lineage) {
+              ksmSavedMB += Math.round(vm.mem * 0.62);
+            } else {
+              ksmSavedMB += Math.round(vm.mem * 0.18);
+            }
+          }
+          ksmSavedMB = Math.min(ksmSavedMB, Math.round(residentMem * 0.68));
+        }
+        const effectiveMem = Math.max(0, residentMem - ksmSavedMB);
+        const ksmPagesSharing = Math.floor((ksmSavedMB * 1024 * 1024) / 4096);
+
+        return {
+          activeMem,
+          pausedMem,
+          residentMem,
+          effectiveMem,
+          ksmSavedMB,
+          ksmPagesSharing,
+          ksmActive,
+          activeCpu,
+          activeVms,
+          residentVms,
+          pausedCandidates
+        };
       }
 
       function wakeVM(id, concurrentCallers) {
         const callers = concurrentCallers || 1;
         counters.http_requests += callers;
         const vm = fleet.find(x => x.id === id);
-        if (!vm) return;
+        if (!vm) return false;
 
         if (vm.state === "running") {
           vm.tick = ++clock;
           logEvent("ev-ok", vm.handle + " already RUNNING; served " + callers + " request(s)");
           render();
-          return;
+          return true;
         }
 
         const q = quotas();
@@ -477,13 +557,13 @@
           counters.quota_rejections += callers;
           logEvent("ev-err", "HTTP 429 on " + vm.handle + ": active_vms requested 1 + used " + u.activeVms + " exceeds limit " + q.maxVms);
           render();
-          return;
+          return false;
         }
         if (q.maxCpu > 0 && u.activeCpu + vm.cpu > q.maxCpu) {
           counters.quota_rejections += callers;
           logEvent("ev-err", "HTTP 429 on " + vm.handle + ": active_vcpus requested " + vm.cpu + " + used " + u.activeCpu + " exceeds limit " + q.maxCpu);
           render();
-          return;
+          return false;
         }
 
         if (vm.state === "paused") {
@@ -493,14 +573,14 @@
           if (callers > 1) counters.coalesced_wakes += (callers - 1);
           logEvent("ev-ok", "Warm resumed " + vm.handle + " (SIGCONT)" + (callers > 1 ? " with " + (callers - 1) + " coalesced wakes" : ""));
           render();
-          return;
+          return true;
         }
 
         if (q.maxMem > 0 && u.activeMem + vm.mem > q.maxMem) {
           counters.quota_rejections += callers;
           logEvent("ev-err", "HTTP 429 on " + vm.handle + ": memory_mb requested " + vm.mem + " + active " + u.activeMem + " exceeds limit " + q.maxMem);
           render();
-          return;
+          return false;
         }
 
         while (q.maxMem > 0 && (u.residentMem + vm.mem > q.maxMem) && u.pausedCandidates.length > 0) {
@@ -517,6 +597,67 @@
         if (callers > 1) counters.coalesced_wakes += (callers - 1);
         logEvent("ev-ok", "Cold booted " + vm.handle + " (" + vm.mem + "MB, " + vm.cpu + " vCPU)" + (callers > 1 ? " + coalesced " + (callers - 1) + " concurrent callers" : ""));
         render();
+        return true;
+      }
+
+      function snapshotVM(id, customName) {
+        const vm = fleet.find(x => x.id === id);
+        if (!vm) return null;
+        clock += 1;
+        const snapName = customName || (vm.handle + "-snap-" + (snapSeq++));
+        const savedBytes = vm.diskMB * 1024 * 1024;
+        counters.snapshots_created += 1;
+        counters.cow_saved_bytes += savedBytes;
+        const snap = {
+          id: "snap-" + snapSeq,
+          name: snapName,
+          sourceId: vm.id,
+          rootFamily: vm.rootFamily || vm.id,
+          mem: vm.mem,
+          cpu: vm.cpu,
+          diskMB: vm.diskMB
+        };
+        snapshots.push(snap);
+        const quiesceNote = vm.state === "running" ? " (transiently paused + resumed)" : "";
+        logEvent("ev-cow", "Created CoW snapshot " + snapName + " from " + vm.handle + quiesceNote + " [FICLONE saved " + vm.diskMB + " MiB]");
+        render();
+        return snap;
+      }
+
+      function branchFrom(id, snapObj, startNow) {
+        const srcVm = fleet.find(x => x.id === id);
+        if (!srcVm && !snapObj) return;
+        const mem = snapObj ? snapObj.mem : srcVm.mem;
+        const cpu = snapObj ? snapObj.cpu : srcVm.cpu;
+        const diskMB = snapObj ? snapObj.diskMB : srcVm.diskMB;
+        const family = snapObj ? snapObj.rootFamily : (srcVm.rootFamily || srcVm.id);
+        const label = snapObj ? snapObj.name : srcVm.handle;
+        const bNum = branchSeq++;
+        const newHandle = "rollout-" + bNum;
+        const newId = "inst-br-" + bNum;
+        const savedBytes = diskMB * 1024 * 1024;
+
+        counters.snapshot_branches += 1;
+        counters.cow_saved_bytes += savedBytes;
+
+        const branchVm = {
+          id: newId,
+          handle: newHandle,
+          mem: mem,
+          cpu: cpu,
+          diskMB: diskMB,
+          state: "stopped",
+          tick: ++clock,
+          lineage: "from " + label,
+          rootFamily: family
+        };
+        fleet.push(branchVm);
+        logEvent("ev-cow", "Spawned CoW branch " + newHandle + " from " + label + " [saved " + diskMB + " MiB disk]");
+        if (startNow !== false) {
+          wakeVM(newId, 1);
+        } else {
+          render();
+        }
       }
 
       function pauseVM(id) {
@@ -538,6 +679,12 @@
         render();
       }
 
+      function formatMiB(bytes) {
+        const mib = Math.round(bytes / (1024 * 1024));
+        if (mib >= 1024) return (mib / 1024).toFixed(2) + " GiB";
+        return mib + " MiB";
+      }
+
       function renderMetrics(u, q) {
         const running = fleet.filter(v => v.state === "running").length;
         const paused = fleet.filter(v => v.state === "paused").length;
@@ -546,13 +693,17 @@
 
         if (format === "json") {
           return JSON.stringify({
-            version: "v0.3.0",
+            version: "v0.4.0",
             backend: "cloud-hypervisor",
             instances: { total: fleet.length, running, starting: 0, paused, stopped, disabled: 0 },
             resources: {
               resident_memory_mb: u.residentMem,
+              effective_resident_memory_mb: u.effectiveMem,
               active_memory_mb: u.activeMem,
               paused_memory_mb: u.pausedMem,
+              ksm_saved_memory_mb: u.ksmSavedMB,
+              ksm_pages_sharing: u.ksmPagesSharing,
+              ksm_active: u.ksmActive,
               max_host_memory_mb: q.maxMem,
               active_vcpus: u.activeCpu,
               max_active_vcpus: q.maxCpu,
@@ -566,7 +717,10 @@
               idle_pauses: counters.idle_pauses,
               idle_stops: counters.idle_stops,
               paused_evictions: counters.paused_evictions,
-              quota_rejections: counters.quota_rejections
+              quota_rejections: counters.quota_rejections,
+              snapshots_created: counters.snapshots_created,
+              snapshot_branches: counters.snapshot_branches,
+              cow_saved_bytes: counters.cow_saved_bytes
             }
           }, null, 2);
         }
@@ -583,20 +737,22 @@
           'omnivm_instances{state="stopped"} ' + stopped,
           "# TYPE omnivm_host_resident_memory_bytes gauge",
           "omnivm_host_resident_memory_bytes " + (u.residentMem * B),
-          "# TYPE omnivm_host_active_memory_bytes gauge",
-          "omnivm_host_active_memory_bytes " + (u.activeMem * B),
-          "# TYPE omnivm_host_paused_memory_bytes gauge",
-          "omnivm_host_paused_memory_bytes " + (u.pausedMem * B),
-          "# TYPE omnivm_host_quota_memory_bytes gauge",
-          "omnivm_host_quota_memory_bytes " + (q.maxMem * B),
-          "# TYPE omnivm_host_active_vcpus gauge",
-          "omnivm_host_active_vcpus " + u.activeCpu,
-          "# TYPE omnivm_host_quota_vcpus gauge",
-          "omnivm_host_quota_vcpus " + q.maxCpu,
+          "# TYPE omnivm_host_effective_resident_memory_bytes gauge",
+          "omnivm_host_effective_resident_memory_bytes " + (u.effectiveMem * B),
+          "# TYPE omnivm_ksm_saved_bytes gauge",
+          "omnivm_ksm_saved_bytes " + (u.ksmSavedMB * B),
+          "# TYPE omnivm_ksm_pages_sharing gauge",
+          "omnivm_ksm_pages_sharing " + u.ksmPagesSharing,
+          "# TYPE omnivm_ksm_active gauge",
+          "omnivm_ksm_active " + (u.ksmActive ? 1 : 0),
+          "# TYPE omnivm_storage_cow_saved_bytes gauge",
+          "omnivm_storage_cow_saved_bytes " + counters.cow_saved_bytes,
+          "# TYPE " + cType("omnivm_lifecycle_snapshots_created") + " counter",
+          "omnivm_lifecycle_snapshots_created_total " + counters.snapshots_created,
+          "# TYPE " + cType("omnivm_lifecycle_snapshot_branches") + " counter",
+          "omnivm_lifecycle_snapshot_branches_total " + counters.snapshot_branches,
           "# TYPE " + cType("omnivm_lifecycle_cold_starts") + " counter",
           "omnivm_lifecycle_cold_starts_total " + counters.cold_starts,
-          "# TYPE " + cType("omnivm_lifecycle_warm_resumes") + " counter",
-          "omnivm_lifecycle_warm_resumes_total " + counters.warm_resumes,
           "# TYPE " + cType("omnivm_lifecycle_coalesced_wakes") + " counter",
           "omnivm_lifecycle_coalesced_wakes_total " + counters.coalesced_wakes,
           "# TYPE " + cType("omnivm_lifecycle_paused_evictions") + " counter",
@@ -618,15 +774,17 @@
         document.getElementById("bar-mem-active").style.width = Math.min(100, (u.activeMem / memDenom) * 100) + "%";
         document.getElementById("bar-mem-paused").style.width = Math.min(100, (u.pausedMem / memDenom) * 100) + "%";
 
-        const cpuDenom = q.maxCpu > 0 ? q.maxCpu : 8;
-        document.getElementById("lbl-cpu").textContent =
-          u.activeCpu + " / " + (q.maxCpu > 0 ? q.maxCpu + " vCPUs" : "unlimited");
-        document.getElementById("bar-cpu").style.width = Math.min(100, (u.activeCpu / cpuDenom) * 100) + "%";
+        const ksmStateStr = u.ksmActive ? "ksmd=scanning" : "ksmd=paused (0% CPU)";
+        document.getElementById("lbl-ksm").textContent =
+          u.effectiveMem + " MB effective (" + u.ksmSavedMB + " MB merged, " + ksmStateStr + ")";
+        document.getElementById("bar-ksm").style.width = Math.min(100, (u.effectiveMem / memDenom) * 100) + "%";
 
         document.getElementById("k-cold").textContent = counters.cold_starts;
-        document.getElementById("k-warm").textContent = counters.warm_resumes;
         document.getElementById("k-coal").textContent = counters.coalesced_wakes;
-        document.getElementById("k-pause").textContent = counters.idle_pauses;
+        document.getElementById("k-snap").textContent = counters.snapshots_created;
+        document.getElementById("k-br").textContent = counters.snapshot_branches;
+        document.getElementById("k-cow").textContent = formatMiB(counters.cow_saved_bytes);
+        document.getElementById("k-ksm").textContent = u.ksmSavedMB + " MB";
         document.getElementById("k-evict").textContent = counters.paused_evictions;
         document.getElementById("k-rej").textContent = counters.quota_rejections;
 
@@ -634,18 +792,34 @@
         tbody.innerHTML = "";
         for (const vm of fleet) {
           const tr = document.createElement("tr");
+          const lineageBadge = vm.lineage ? '<span class="lineage-tag">' + vm.lineage + '</span>' : '';
           tr.innerHTML =
-            '<td style="font-family:var(--mono)">' + vm.handle + "</td>" +
+            '<td style="font-family:var(--mono)">' + vm.handle + lineageBadge + "</td>" +
             '<td style="font-family:var(--mono);color:var(--muted)">' + vm.mem + "MB / " + vm.cpu + "c</td>" +
             '<td><span class="pill state-' + vm.state + '">' + vm.state.toUpperCase() + "</span></td>" +
             '<td style="font-family:var(--mono);color:var(--muted)">' + (vm.tick ? "t=" + vm.tick : "-") + "</td>" +
             "<td></td>";
           const actionCell = tr.lastElementChild;
+
           const bWake = document.createElement("button");
           bWake.className = "btn btn-sm";
           bWake.textContent = "Wake";
           bWake.onclick = () => wakeVM(vm.id, 1);
           actionCell.appendChild(bWake);
+
+          const bSnap = document.createElement("button");
+          bSnap.className = "btn btn-sm";
+          bSnap.style.marginLeft = "4px";
+          bSnap.textContent = "Snap";
+          bSnap.onclick = () => snapshotVM(vm.id);
+          actionCell.appendChild(bSnap);
+
+          const bBranch = document.createElement("button");
+          bBranch.className = "btn btn-sm";
+          bBranch.style.marginLeft = "4px";
+          bBranch.textContent = "Branch";
+          bBranch.onclick = () => branchFrom(vm.id, null, true);
+          actionCell.appendChild(bBranch);
 
           if (vm.state === "running") {
             const bPause = document.createElement("button");
@@ -669,13 +843,45 @@
         document.getElementById("metrics-out").textContent = renderMetrics(u, q);
       }
 
-      document.getElementById("btn-reset").onclick = () => {
+      function resetAll() {
         fleet = initialFleet();
+        snapshots = [];
         clock = 1;
-        counters = { cold_starts: 0, warm_resumes: 0, coalesced_wakes: 0, idle_pauses: 0, idle_stops: 0, paused_evictions: 0, quota_rejections: 0, http_requests: 0 };
+        branchSeq = 1;
+        snapSeq = 1;
+        counters = {
+          cold_starts: 0,
+          warm_resumes: 0,
+          coalesced_wakes: 0,
+          idle_pauses: 0,
+          idle_stops: 0,
+          paused_evictions: 0,
+          quota_rejections: 0,
+          snapshots_created: 0,
+          snapshot_branches: 0,
+          cow_saved_bytes: 0,
+          http_requests: 0
+        };
         logBox.innerHTML = "";
-        logEvent("ev-ok", "Reset microVM fleet and telemetry counters");
+      }
+
+      document.getElementById("btn-reset").onclick = () => {
+        resetAll();
+        logEvent("ev-ok", "Reset microVM fleet, snapshots, and telemetry counters");
         render();
+      };
+
+      document.getElementById("sc-branch").onclick = () => {
+        elMem.value = "2560";
+        elCpu.value = "6";
+        elVms.value = "5";
+        elKsm.value = "auto";
+        resetAll();
+        wakeVM("inst-2", 1);
+        const snap = snapshotVM("inst-2", "golden-v1");
+        branchFrom("inst-2", snap, true);
+        branchFrom("inst-2", snap, true);
+        branchFrom("inst-2", snap, false);
       };
 
       document.getElementById("sc-coalesce").onclick = () => {
@@ -688,19 +894,19 @@
         elMem.value = "1024";
         elCpu.value = "4";
         elVms.value = "3";
-        fleet = initialFleet();
+        resetAll();
         wakeVM("inst-2", 1);
         pauseVM("inst-2");
         wakeVM("inst-3", 1);
         pauseVM("inst-3");
-        wakeVM("inst-5", 1);
+        wakeVM("inst-4", 1);
       };
 
       document.getElementById("sc-429").onclick = () => {
-        elMem.value = "1024";
+        elMem.value = "1536";
         elCpu.value = "3";
         elVms.value = "2";
-        fleet = initialFleet();
+        resetAll();
         wakeVM("inst-1", 1);
         wakeVM("inst-2", 1);
         wakeVM("inst-4", 1);
@@ -715,9 +921,9 @@
         };
       });
 
-      [elMem, elCpu, elVms].forEach(inp => { inp.oninput = render; });
+      [elMem, elCpu, elVms, elKsm].forEach(inp => { inp.oninput = render; inp.onchange = render; });
 
-      logEvent("ev-ok", "Simulator ready: try a scenario or click Wake on any microVM");
+      logEvent("ev-ok", "Simulator ready: click Simulate CoW Snapshot + 3x Branch + KSM Dedup or test per-VM controls");
       render();
     })();
   </script>

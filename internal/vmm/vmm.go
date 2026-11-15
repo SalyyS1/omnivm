@@ -74,6 +74,17 @@ type VMConfig struct {
 	// ExposePorts lists guest ports to expose on the host via port mapping.
 	// When set, the backend allocates random host ports and maps them to guest ports.
 	ExposePorts []PortExpose
+
+	// MergeableMemory hints that anonymous guest RAM may be marked MADV_MERGEABLE
+	// for Linux KSM Copy-on-Write page deduplication when shared vhost-user DMA
+	// (WorkspacePath) is not active.
+	MergeableMemory bool
+}
+
+// Snapshotter is an optional extension implemented by VMM backends that support
+// capturing paused hypervisor device and memory state into destDir.
+type Snapshotter interface {
+	SnapshotVM(h Handle, destDir string) error
 }
 
 // HostEndpoint describes a mapped port on the host side.
