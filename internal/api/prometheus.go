@@ -113,6 +113,29 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 	writeGauge("omnivm_host_active_vms", "Number of concurrently starting or running microVMs.", int64(resMetrics.ActiveVMs))
 	writeGauge("omnivm_host_quota_active_vms", "Configured concurrent active microVM admission ceiling (0 when unlimited).", int64(resMetrics.MaxActiveVMs))
 
+	cgAvail := int64(0)
+	if resMetrics.CgroupAvailable {
+		cgAvail = 1
+	}
+	writeGauge("omnivm_cgroup_available", "Whether Linux cgroup v2 memory accounting is available for ovmd (1=available, 0=unavailable).", cgAvail)
+	writeGauge("omnivm_cgroup_memory_current_bytes", "Current cgroup v2 memory usage in bytes.", int64(resMetrics.CgroupMemoryCurrentBytes))
+	writeGauge("omnivm_cgroup_memory_high_bytes", "Active cgroup v2 memory.high soft-throttle watermark in bytes (0 when max/unlimited).", int64(resMetrics.CgroupMemoryHighBytes))
+	writeGauge("omnivm_cgroup_memory_max_bytes", "Configured cgroup v2 memory.max hard limit in bytes (0 when max/unlimited).", int64(resMetrics.CgroupMemoryMaxBytes))
+	writeCounter("omnivm_cgroup_memory_high_throttles", "Total cgroup v2 memory.high soft-limit throttle and direct-reclaim events.", resMetrics.CgroupHighThrottleEvents)
+	writeCounter("omnivm_cgroup_memory_oom_events", "Total cgroup v2 out-of-memory and OOM-kill events.", resMetrics.CgroupOOMEvents)
+	fmt.Fprintf(&b, "# HELP omnivm_cgroup_memory_psi_avg10_percent 10-second Linux PSI memory stall percentage partitioned by level.\n")
+	fmt.Fprintf(&b, "# TYPE omnivm_cgroup_memory_psi_avg10_percent gauge\n")
+	fmt.Fprintf(&b, "omnivm_cgroup_memory_psi_avg10_percent{level=\"some\"} %.4f\n", resMetrics.CgroupPSISomeAvg10)
+	fmt.Fprintf(&b, "omnivm_cgroup_memory_psi_avg10_percent{level=\"full\"} %.4f\n", resMetrics.CgroupPSIFullAvg10)
+	psiType := "omnivm_cgroup_memory_psi_stall_microseconds_total"
+	if openMetrics {
+		psiType = "omnivm_cgroup_memory_psi_stall_microseconds"
+	}
+	fmt.Fprintf(&b, "# HELP %s Cumulative Linux PSI memory stall duration in microseconds.\n", psiType)
+	fmt.Fprintf(&b, "# TYPE %s counter\n", psiType)
+	fmt.Fprintf(&b, "omnivm_cgroup_memory_psi_stall_microseconds_total{level=\"some\"} %d\n", resMetrics.CgroupPSISomeTotalMicros)
+	fmt.Fprintf(&b, "omnivm_cgroup_memory_psi_stall_microseconds_total{level=\"full\"} %d\n", resMetrics.CgroupPSIFullTotalMicros)
+
 	writeCounter("omnivm_lifecycle_cold_starts", "Total cold boots completed from STOPPED to RUNNING.", lmMetrics.ColdStarts)
 	writeCounter("omnivm_lifecycle_boot_failures", "Total failed cold boot attempts.", lmMetrics.BootFailures)
 	writeCounter("omnivm_lifecycle_warm_resumes", "Total sub-second warm resumes from PAUSED to RUNNING.", lmMetrics.WarmResumes)

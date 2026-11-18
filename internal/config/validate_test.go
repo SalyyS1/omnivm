@@ -127,6 +127,18 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "invalid_ksm_governor",
 			mutate: func(c *Config) { c.KSMGovernor = "aggressive" },
 		},
+		{
+			name:   "invalid_cgroup_governor",
+			mutate: func(c *Config) { c.CgroupGovernor = "turbo" },
+		},
+		{
+			name:   "cgroup_ratio_too_low",
+			mutate: func(c *Config) { c.CgroupMemoryHighRatio = 0.25 },
+		},
+		{
+			name:   "cgroup_ratio_too_high",
+			mutate: func(c *Config) { c.CgroupMemoryHighRatio = 1.05 },
+		},
 	}
 
 	for _, tc := range tests {

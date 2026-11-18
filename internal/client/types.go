@@ -134,20 +134,31 @@ type InstanceCounts struct {
 	Disabled int `json:"disabled"`
 }
 
-// HostResourceMetrics reports live host memory, vCPU, active VM usage, and KSM deduplication savings alongside configured ceilings.
+// HostResourceMetrics reports live host memory, vCPU, active VM usage, KSM deduplication savings,
+// and Linux cgroup v2 memory.high watermark / PSI stall counters alongside configured ceilings.
 type HostResourceMetrics struct {
-	ResidentMemoryMB          int    `json:"resident_memory_mb"`
-	EffectiveResidentMemoryMB int    `json:"effective_resident_memory_mb"`
-	ActiveMemoryMB            int    `json:"active_memory_mb"`
-	PausedMemoryMB            int    `json:"paused_memory_mb"`
-	KSMSavedMemoryMB          int    `json:"ksm_saved_memory_mb"`
-	KSMPagesSharing           uint64 `json:"ksm_pages_sharing"`
-	KSMActive                 bool   `json:"ksm_active"`
-	MaxHostMemoryMB           int    `json:"max_host_memory_mb"`
-	ActiveVCPUs               int    `json:"active_vcpus"`
-	MaxActiveVCPUs            int    `json:"max_active_vcpus"`
-	ActiveVMs                 int    `json:"active_vms"`
-	MaxActiveVMs              int    `json:"max_active_vms"`
+	ResidentMemoryMB          int     `json:"resident_memory_mb"`
+	EffectiveResidentMemoryMB int     `json:"effective_resident_memory_mb"`
+	ActiveMemoryMB            int     `json:"active_memory_mb"`
+	PausedMemoryMB            int     `json:"paused_memory_mb"`
+	KSMSavedMemoryMB          int     `json:"ksm_saved_memory_mb"`
+	KSMPagesSharing           uint64  `json:"ksm_pages_sharing"`
+	KSMActive                 bool    `json:"ksm_active"`
+	MaxHostMemoryMB           int     `json:"max_host_memory_mb"`
+	ActiveVCPUs               int     `json:"active_vcpus"`
+	MaxActiveVCPUs            int     `json:"max_active_vcpus"`
+	ActiveVMs                 int     `json:"active_vms"`
+	MaxActiveVMs              int     `json:"max_active_vms"`
+	CgroupAvailable           bool    `json:"cgroup_available"`
+	CgroupMemoryCurrentBytes  uint64  `json:"cgroup_memory_current_bytes"`
+	CgroupMemoryHighBytes     uint64  `json:"cgroup_memory_high_bytes"`
+	CgroupMemoryMaxBytes      uint64  `json:"cgroup_memory_max_bytes"`
+	CgroupHighThrottleEvents  uint64  `json:"cgroup_high_throttle_events"`
+	CgroupOOMEvents           uint64  `json:"cgroup_oom_events"`
+	CgroupPSISomeAvg10        float64 `json:"cgroup_psi_some_avg10"`
+	CgroupPSIFullAvg10        float64 `json:"cgroup_psi_full_avg10"`
+	CgroupPSISomeTotalMicros  uint64  `json:"cgroup_psi_some_total_micros"`
+	CgroupPSIFullTotalMicros  uint64  `json:"cgroup_psi_full_total_micros"`
 }
 
 // LifecycleMetrics holds scale-to-zero lifecycle counters.

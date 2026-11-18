@@ -65,6 +65,8 @@ func main() {
 		cmdStatus()
 	case "metrics":
 		cmdMetrics()
+	case "bench":
+		cmdBench()
 	case "doctor":
 		cmdDoctor()
 	case "instance":
@@ -99,6 +101,7 @@ Commands:
   run        Run a command in an ephemeral microVM (start + follow + delete)
   status     Show daemon status
   metrics    Export daemon telemetry (--prometheus or --json)
+  bench      Run host microVM subsystem benchmarks (prefault)
   doctor     Print platform and backend info
   instance   Manage instances (start, branch, list, info, disable, delete, pause, resume, prune)
   snapshot   Manage Copy-on-Write microVM snapshots and branches (create, list, info, branch, delete)
@@ -670,6 +673,16 @@ func cmdStatus() {
 			numField(res, "paused_memory_mb"),
 			numField(res, "active_vcpus"),
 			numField(res, "active_vms"))
+		if cgAvail, _ := res["cgroup_available"].(bool); cgAvail {
+			fmt.Printf("cgroup_v2: current=%s high=%s max=%s high_throttles=%.0f oom_events=%.0f psi_some10=%.2f%% psi_full10=%.2f%%\n",
+				formatBytesUint(uint64(numField(res, "cgroup_memory_current_bytes"))),
+				formatBytesUint(uint64(numField(res, "cgroup_memory_high_bytes"))),
+				formatBytesUint(uint64(numField(res, "cgroup_memory_max_bytes"))),
+				numField(res, "cgroup_high_throttle_events"),
+				numField(res, "cgroup_oom_events"),
+				numField(res, "cgroup_psi_some_avg10"),
+				numField(res, "cgroup_psi_full_avg10"))
+		}
 	}
 }
 

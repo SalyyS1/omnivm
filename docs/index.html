@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.4.0 | Scale-to-Zero KVM MicroVM, CoW Branching &amp; KSM Dedup Simulator</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, Copy-on-Write microVM snapshot branching, adaptive Linux KSM memory deduplication, single-flight wake coalescing, and Prometheus/OpenMetrics simulator for OmniVM v0.4.0." />
+  <title>OmniVM v0.6.0 | Scale-to-Zero KVM MicroVM, Vsock Mux, Cgroup v2 &amp; KSM Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, adaptive Linux KSM memory deduplication, and Prometheus/OpenMetrics simulator for OmniVM v0.6.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -307,15 +307,15 @@
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.4.0 Control Plane</span>
-        <h1>Scale-to-Zero KVM MicroVM, CoW Branching &amp; KSM Simulator</h1>
+        <span class="badge">OmniVM v0.6.0 Control Plane</span>
+        <h1>Scale-to-Zero KVM MicroVM, Vsock Mux, Cgroup v2 &amp; KSM Simulator</h1>
         <p class="subtitle">
-          Explore Copy-on-Write snapshot branching (FICLONE reflinks + sparse extents), zero-overhead adaptive Linux KSM page deduplication, single-flight wake coalescing, LRU paused eviction, and Prometheus / OpenMetrics telemetry.
+          Explore Copy-on-Write snapshot branching (FICLONE reflinks + sparse extents), zero-network virtio-vsock stream multiplexing, dynamic cgroup v2 memory.high watermark telemetry, adaptive Linux KSM page deduplication, warm-pool pre-faulting, and Prometheus / OpenMetrics exposition.
         </p>
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.4.0">Release v0.4.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.6.0">Release v0.6.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -708,7 +708,12 @@
               active_vcpus: u.activeCpu,
               max_active_vcpus: q.maxCpu,
               active_vms: u.activeVms,
-              max_active_vms: q.maxVms
+              max_active_vms: q.maxVms,
+              cgroup_available: true,
+              cgroup_memory_current_bytes: u.effectiveMem * B,
+              cgroup_memory_high_bytes: q.maxMem > 0 ? Math.floor(q.maxMem * 0.85) * B : 0,
+              cgroup_memory_max_bytes: q.maxMem * B,
+              cgroup_high_throttle_events: counters.paused_evictions * 2
             },
             lifecycle: {
               cold_starts: counters.cold_starts,
@@ -745,6 +750,10 @@
           "omnivm_ksm_pages_sharing " + u.ksmPagesSharing,
           "# TYPE omnivm_ksm_active gauge",
           "omnivm_ksm_active " + (u.ksmActive ? 1 : 0),
+          "# TYPE omnivm_cgroup_memory_high_bytes gauge",
+          "omnivm_cgroup_memory_high_bytes " + (q.maxMem > 0 ? Math.floor(q.maxMem * 0.85) * B : 0),
+          "# TYPE " + cType("omnivm_cgroup_memory_high_throttles") + " counter",
+          "omnivm_cgroup_memory_high_throttles_total " + (counters.paused_evictions * 2),
           "# TYPE omnivm_storage_cow_saved_bytes gauge",
           "omnivm_storage_cow_saved_bytes " + counters.cow_saved_bytes,
           "# TYPE " + cType("omnivm_lifecycle_snapshots_created") + " counter",

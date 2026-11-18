@@ -105,6 +105,15 @@ type Config struct {
 	// MemoryDedup enables MADV_MERGEABLE anonymous guest RAM hints when
 	// virtiofs shared DMA is not attached. Set via OVM_MEMORY_DEDUP (default true).
 	MemoryDedup bool
+
+	// CgroupGovernor controls the Linux cgroup v2 memory.high watermark governor:
+	// "off" (read-only telemetry, default), "static", or "adaptive".
+	// Set via OVM_CGROUP_GOVERNOR.
+	CgroupGovernor string
+
+	// CgroupMemoryHighRatio sets the baseline memory.high / ceiling ratio
+	// (between 0.50 and 0.98, or 0 for default 0.85). Set via OVM_CGROUP_MEMORY_HIGH_RATIO.
+	CgroupMemoryHighRatio float64
 }
 
 // DefaultConfig returns the default configuration.
@@ -126,34 +135,52 @@ func DefaultConfig() *Config {
 	if ksmMode == "" {
 		ksmMode = "off"
 	}
+	cgroupMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_CGROUP_GOVERNOR")))
+	if cgroupMode == "" {
+		cgroupMode = "off"
+	}
 
 	return &Config{
-		DataDir:         filepath.Join(ovmDir, "data"),
-		BinDir:          execDir,
-		SocketPath:      filepath.Join(ovmDir, "ovmd.sock"),
-		DefaultMemoryMB: 512,
-		DefaultVCPUs:    1,
-		RouterAddr:      "127.0.0.1:8099",
-		DBPath:          filepath.Join(ovmDir, "data", "ovm.db"),
-		ImageCacheDir:   filepath.Join(ovmDir, "data", "images"),
-		OverlaysDir:     filepath.Join(ovmDir, "data", "overlays"),
-		WorkspacesDir:   filepath.Join(ovmDir, "data", "workspaces"),
-		SnapshotsDir:    filepath.Join(ovmDir, "data", "snapshots"),
-		LogsDir:         filepath.Join(ovmDir, "data", "logs"),
-		MasterKeyPath:   filepath.Join(ovmDir, "master.key"),
-		PauseAfterIdle:  60 * time.Second,
-		StopAfterIdle:   5 * time.Minute,
-		NetworkBackend:  "auto",
-		KernelPath:      kernelPath,
-		DNSServer:       os.Getenv("OVM_DNS"),
-		MinDiskMB:       512,
-		MaxDiskMB:       64 * 1024,
-		MaxHostMemoryMB: parseOptionalEnvInt("OVM_MAX_HOST_MEMORY_MB"),
-		MaxActiveVCPUs:  parseOptionalEnvInt("OVM_MAX_ACTIVE_VCPUS"),
-		MaxActiveVMs:    parseOptionalEnvInt("OVM_MAX_ACTIVE_VMS"),
-		KSMGovernor:     ksmMode,
-		MemoryDedup:     parseOptionalEnvBool("OVM_MEMORY_DEDUP", true),
+		DataDir:               filepath.Join(ovmDir, "data"),
+		BinDir:                execDir,
+		SocketPath:            filepath.Join(ovmDir, "ovmd.sock"),
+		DefaultMemoryMB:       512,
+		DefaultVCPUs:          1,
+		RouterAddr:            "127.0.0.1:8099",
+		DBPath:                filepath.Join(ovmDir, "data", "ovm.db"),
+		ImageCacheDir:         filepath.Join(ovmDir, "data", "images"),
+		OverlaysDir:           filepath.Join(ovmDir, "data", "overlays"),
+		WorkspacesDir:         filepath.Join(ovmDir, "data", "workspaces"),
+		SnapshotsDir:          filepath.Join(ovmDir, "data", "snapshots"),
+		LogsDir:               filepath.Join(ovmDir, "data", "logs"),
+		MasterKeyPath:         filepath.Join(ovmDir, "master.key"),
+		PauseAfterIdle:        60 * time.Second,
+		StopAfterIdle:         5 * time.Minute,
+		NetworkBackend:        "auto",
+		KernelPath:            kernelPath,
+		DNSServer:             os.Getenv("OVM_DNS"),
+		MinDiskMB:             512,
+		MaxDiskMB:             64 * 1024,
+		MaxHostMemoryMB:       parseOptionalEnvInt("OVM_MAX_HOST_MEMORY_MB"),
+		MaxActiveVCPUs:        parseOptionalEnvInt("OVM_MAX_ACTIVE_VCPUS"),
+		MaxActiveVMs:          parseOptionalEnvInt("OVM_MAX_ACTIVE_VMS"),
+		KSMGovernor:           ksmMode,
+		MemoryDedup:           parseOptionalEnvBool("OVM_MEMORY_DEDUP", true),
+		CgroupGovernor:        cgroupMode,
+		CgroupMemoryHighRatio: parseOptionalEnvFloat("OVM_CGROUP_MEMORY_HIGH_RATIO"),
 	}
+}
+
+func parseOptionalEnvFloat(key string) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return -1
+	}
+	return v
 }
 
 func parseOptionalEnvBool(key string, defaultVal bool) bool {
@@ -246,6 +273,14 @@ func (c *Config) Validate() error {
 	case "", "off", "auto", "on":
 	default:
 		return fmt.Errorf("unsupported ksm_governor %q: expected off, auto, or on", c.KSMGovernor)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.CgroupGovernor)) {
+	case "", "off", "static", "adaptive":
+	default:
+		return fmt.Errorf("unsupported cgroup_governor %q: expected off, static, or adaptive", c.CgroupGovernor)
+	}
+	if c.CgroupMemoryHighRatio != 0 && (c.CgroupMemoryHighRatio < 0.50 || c.CgroupMemoryHighRatio > 0.98) {
+		return fmt.Errorf("cgroup_memory_high_ratio must be 0 or between 0.50 and 0.98, got %v", c.CgroupMemoryHighRatio)
 	}
 	if c.DNSServer != "" {
 		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {

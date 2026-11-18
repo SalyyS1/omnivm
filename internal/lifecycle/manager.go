@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/SalyyS1/omnivm/internal/cgroup"
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/image"
 	"github.com/SalyyS1/omnivm/internal/ksm"
@@ -376,6 +377,7 @@ type Manager struct {
 	registry    *registry.DB
 	tetherStore *tether.Store
 	ksmGov      *ksm.Governor
+	cgroupGov   *cgroup.Governor
 
 	metrics lifecycleCounters
 
@@ -391,8 +393,16 @@ type Manager struct {
 // NewManager creates a lifecycle manager.
 func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *image.Cache, ov overlay.Overlay) *Manager {
 	ksmMode := ksm.ModeOff
-	if cfg != nil && cfg.KSMGovernor != "" {
-		ksmMode = cfg.KSMGovernor
+	cgroupMode := cgroup.ModeOff
+	var cgroupRatio float64
+	if cfg != nil {
+		if cfg.KSMGovernor != "" {
+			ksmMode = cfg.KSMGovernor
+		}
+		if cfg.CgroupGovernor != "" {
+			cgroupMode = cfg.CgroupGovernor
+		}
+		cgroupRatio = cfg.CgroupMemoryHighRatio
 	}
 	return &Manager{
 		instances:  make(map[string]*Instance),
@@ -403,7 +413,22 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		imageCache: imgCache,
 		overlay:    ov,
 		ksmGov:     ksm.NewGovernor("", ksmMode, 0),
+		cgroupGov:  cgroup.NewGovernor("", cgroupMode, cgroupRatio),
 	}
+}
+
+// SetCgroupGovernor overrides the cgroup v2 watermark governor (e.g. for testing).
+func (m *Manager) SetCgroupGovernor(gov *cgroup.Governor) {
+	m.mu.Lock()
+	m.cgroupGov = gov
+	m.mu.Unlock()
+}
+
+// CgroupGovernor returns the active cgroup v2 watermark governor.
+func (m *Manager) CgroupGovernor() *cgroup.Governor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cgroupGov
 }
 
 // SetKSMGovernor overrides the KSM governor (e.g. for testing against a synthetic sysfs path).
@@ -2518,4 +2543,5 @@ func (m *Manager) notifyStateChange(id, state string) {
 		fn(id, state)
 	}
 	m.reconcileKSM()
+	m.reconcileCgroup()
 }

@@ -112,6 +112,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /metrics", s.handlePrometheusMetrics)
+	s.mux.HandleFunc("POST /v1/bench/prefault", s.handleBenchPrefault)
 }
 
 // Start begins listening on the unix socket.
@@ -211,6 +212,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"snapshot_branching":    true,
 			"cow_overlays":          true,
 			"ksm_dedup":             s.cfg == nil || s.cfg.MemoryDedup,
+			"vsock_mux":             true,
+			"cgroup_v2_watermark":   resMetrics.CgroupAvailable,
+			"warm_pool_prefault":    true,
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,

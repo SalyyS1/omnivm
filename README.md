@@ -67,6 +67,13 @@ AI evaluation harnesses and speculative code-execution pipelines frequently fork
 - **Speculative MicroVM Branching (`BranchInstance`)**: Branches can be spawned from a named snapshot (`POST /v1/snapshots/{id}/branch` / `ovm snapshot branch`) or directly from a live/paused/stopped instance (`POST /v1/instances/{id}/branch` / `ovm instance branch`), with optional command, environment, resource, and `start=false` (0 MB RAM lazy wake-on-request) overrides. Also exposed to LLM agents via `ovm-mcp` tools (`snapshot_create`, `snapshot_list`, `snapshot_delete`, `instance_branch`).
 - **Zero-Overhead Memory Deduplication (`internal/ksm` + `MADV_MERGEABLE`)**: When `OVM_MEMORY_DEDUP=true` (default) and `virtiofs` shared DMA is not attached, Cloud Hypervisor marks anonymous guest RAM `mergeable=on` (`MADV_MERGEABLE`). The adaptive KSM governor (`OVM_KSM_GOVERNOR=auto`) keeps `ksmd` paused (`run=0`, 0% background CPU overhead while retaining already-merged CoW pages) whenever fewer than 2 microVMs hold resident RAM, activates `ksmd` (`run=1`, `50ms` ramp) when 2 or more microVMs are resident, and backs off to steady-state (`200ms`) once page sharing stabilizes.
 
+## Zero-Network Virtio-Vsock Multiplexing, Cgroup v2 Watermarks, and Warm-Pool Pre-Faulting (`v0.6.0`)
+
+- **Binary-Framed Virtio-Vsock Stream Multiplexer (`internal/vsockmux`)**: Multiplexes concurrent full-duplex `net.Conn` streams (`OpenStream`, `AcceptStream`, `CloseWrite`, `Reset`, `Ping`, `GoAway`) over a single `AF_VSOCK` or Cloud Hypervisor host Unix vsock socket (`DialCloudHypervisorVsock`). Uses a 10-byte wire header and per-stream 256 KiB sliding credit windows (`FrameWindowUpdate`) so airgapped (`--no-network`) sandboxes stream stdio, RPC, and binary blobs without TCP/IP interfaces or cross-stream head-of-line blocking.
+- **Dynamic Linux Cgroup v2 `memory.high` Watermark Governor (`internal/cgroup`)**: Reads `memory.current`, `memory.high`, `memory.max`, `memory.events` (`high` soft-throttle direct-reclaim counts and `oom`/`oom_kill` events), and Linux PSI (`memory.pressure` `some`/`full` stall ratios). When `OVM_CGROUP_GOVERNOR=adaptive`, `ovmd` tightens `memory.high` on hard-limit breaches so kernel direct reclaim engages before OOM kills, relaxes `memory.high` under severe PSI `full` stalls when headroom exists, and exposes `omnivm_cgroup_*` Prometheus/OpenMetrics series.
+- **Automated Warm-Pool Page Pre-Faulting and Benchmark (`internal/prefault` + `ovm bench prefault`)**: Populates anonymous guest memory pools and `mmap` snapshot images ahead of wake via Linux `MADV_POPULATE_WRITE` / `MADV_POPULATE_READ` (`MADV_WILLNEED` + parallel page-stride worker fallback), eliminating first-touch minor page faults (`minflt=0` on warm slots) and exposing `ovm bench prefault [--json]` plus `POST /v1/bench/prefault`.
+- **Live MicroVM Migration and Per-VM Network Namespace Isolation (`internal/migration`, `internal/netns`)**: Iterative dirty-bitmap pre-copy and optional post-copy live migration (`POST /v1/instances/{id}/migrate`, `ovm instance migrate`) alongside isolated `/run/netns/ovm-<id>` veth pairs with `/30` subnet allocation.
+
 ## Quick Start
 
 ### Prerequisites
@@ -154,6 +161,7 @@ Both the CLI and Unix-socket API expose structured JSON status alongside Prometh
 ./bin/ovm status --json
 ./bin/ovm metrics
 ./bin/ovm metrics --prometheus
+./bin/ovm bench prefault --pool-size 4 --memory-mb 16 --json
 ./bin/ovm instance list --json
 ```
 
@@ -171,8 +179,8 @@ Example `GET /v1/metrics` response:
 
 ```json
 {
-  "timestamp": "2026-11-15T08:00:00Z",
-  "version": "v0.4.0",
+  "timestamp": "2026-11-18T03:00:00Z",
+  "version": "v0.6.0",
   "backend": "cloud-hypervisor",
   "uptime_seconds": 3420,
   "instances": {

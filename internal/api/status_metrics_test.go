@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/SalyyS1/omnivm/internal/cgroup"
 	"github.com/SalyyS1/omnivm/internal/client"
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/lifecycle"
@@ -446,5 +448,115 @@ func TestPrometheusAndOpenMetricsExposition_AndQuotaHTTP429(t *testing.T) {
 	}
 	if dm.Resources.ResidentMemoryMB != 256 || dm.Resources.MaxHostMemoryMB != 512 || dm.Lifecycle.QuotaRejections != 2 {
 		t.Errorf("unexpected JSON metrics resources/quotas: %+v / %+v", dm.Resources, dm.Lifecycle)
+	}
+}
+
+func TestCgroupV2MetricsExposition_AndPrefaultBenchEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	cgDir := filepath.Join(dir, "cgroup")
+	if err := os.MkdirAll(cgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.current"), []byte("314572800\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.swap.current"), []byte("0\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.high"), []byte("max\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.max"), []byte("536870912\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.events"), []byte("low 0\nhigh 17\nmax 1\noom 0\noom_kill 0\n"), 0644)
+	_ = os.WriteFile(filepath.Join(cgDir, "memory.pressure"), []byte("some avg10=1.50 avg60=0.40 avg300=0.10 total=9200\nfull avg10=0.25 avg60=0.05 avg300=0.00 total=1400\n"), 0644)
+
+	sockPath := filepath.Join(dir, "ovmd.sock")
+	cfg := &config.Config{
+		SocketPath:      sockPath,
+		WorkspacesDir:   filepath.Join(dir, "workspaces"),
+		DefaultMemoryMB: 256,
+		DefaultVCPUs:    1,
+		MinDiskMB:       256,
+		MaxDiskMB:       4096,
+		MaxHostMemoryMB: 512,
+		PauseAfterIdle:  5 * time.Minute,
+		StopAfterIdle:   10 * time.Minute,
+		CgroupGovernor:  "adaptive",
+	}
+
+	reg, err := registry.Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Close()
+
+	ss, err := secrets.NewStore(filepath.Join(dir, "master.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ls := logstore.NewStore(filepath.Join(dir, "logs"))
+	fv := &apiTestVMM{}
+	lm := lifecycle.NewManager(fv, cfg, ls, nil, nil)
+	defer lm.Shutdown()
+	lm.SetRegistry(reg)
+	lm.SetCgroupGovernor(cgroup.NewGovernor(cgDir, cgroup.ModeAdaptive, 0.85))
+
+	lm.CreateInstance("inst-cg", []string{"serve"}, nil, lifecycle.WithHandle("cg-svc"))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := lm.EnsureInstance(ctx, "inst-cg"); err != nil {
+		t.Fatalf("EnsureInstance: %v", err)
+	}
+
+	srv := NewServer(cfg, fv, lm, reg, ss, ls, nil)
+	if err := srv.Start(); err != nil {
+		t.Fatalf("srv.Start: %v", err)
+	}
+	defer srv.Stop(context.Background())
+
+	cli := client.New(sockPath)
+	dm, err := cli.Metrics(ctx)
+	if err != nil {
+		t.Fatalf("cli.Metrics: %v", err)
+	}
+	if !dm.Resources.CgroupAvailable || dm.Resources.CgroupHighThrottleEvents != 17 || dm.Resources.CgroupMemoryHighBytes == 0 {
+		t.Fatalf("unexpected cgroup v2 JSON metrics: %+v", dm.Resources)
+	}
+
+	promText, err := cli.MetricsPrometheus(ctx)
+	if err != nil {
+		t.Fatalf("MetricsPrometheus: %v", err)
+	}
+	for _, want := range []string{
+		`omnivm_cgroup_available 1`,
+		`omnivm_cgroup_memory_current_bytes 314572800`,
+		`omnivm_cgroup_memory_high_throttles_total 17`,
+		`omnivm_cgroup_memory_psi_avg10_percent{level="some"} 1.5000`,
+		`omnivm_cgroup_memory_psi_stall_microseconds_total{level="full"} 1400`,
+	} {
+		if !strings.Contains(promText, want) {
+			t.Errorf("Prometheus output missing %q\n%s", want, promText)
+		}
+	}
+
+	// Verify POST /v1/bench/prefault endpoint
+	ts := httptest.NewServer(srv.mux)
+	defer ts.Close()
+	benchPayload, _ := json.Marshal(map[string]interface{}{
+		"pool_size":      2,
+		"slot_memory_mb": 4,
+		"workers":        2,
+		"iterations":     2,
+		"strategy":       "touch-write",
+	})
+	resp, err := http.Post(ts.URL+"/v1/bench/prefault", "application/json", bytes.NewReader(benchPayload))
+	if err != nil {
+		t.Fatalf("POST /v1/bench/prefault: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bench status = %d: %s", resp.StatusCode, string(b))
+	}
+	var benchRes map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&benchRes); err != nil {
+		t.Fatalf("decode bench response: %v", err)
+	}
+	if benchRes["strategy"] != "touch-write" {
+		t.Fatalf("unexpected bench response: %+v", benchRes)
 	}
 }
