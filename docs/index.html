@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.6.0 | Scale-to-Zero KVM MicroVM, Vsock Mux, Cgroup v2 &amp; KSM Simulator</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, adaptive Linux KSM memory deduplication, and Prometheus/OpenMetrics simulator for OmniVM v0.6.0." />
+  <title>OmniVM v0.7.0 | Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, proactive Linux KSM governor with spawn-burst scaling, sparse extent disk-cache pre-warming, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, and Prometheus/OpenMetrics wake latency histogram simulator for OmniVM v0.7.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -307,15 +307,15 @@
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.6.0 Control Plane</span>
-        <h1>Scale-to-Zero KVM MicroVM, Vsock Mux, Cgroup v2 &amp; KSM Simulator</h1>
+        <span class="badge">OmniVM v0.7.0 Control Plane</span>
+        <h1>Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</h1>
         <p class="subtitle">
-          Explore Copy-on-Write snapshot branching (FICLONE reflinks + sparse extents), zero-network virtio-vsock stream multiplexing, dynamic cgroup v2 memory.high watermark telemetry, adaptive Linux KSM page deduplication, warm-pool pre-faulting, and Prometheus / OpenMetrics exposition.
+          Explore proactive Linux KSM memory deduplication (fleet-density burst scaling + NUMA locality), sparse-extent page-cache disk pre-warming (POSIX_FADV_WILLNEED), Copy-on-Write snapshot branching, virtio-vsock stream multiplexing, dynamic cgroup v2 watermarks, and Prometheus / OpenMetrics wake latency histograms.
         </p>
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.6.0">Release v0.6.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.7.0">Release v0.7.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -343,9 +343,18 @@
           <div class="field">
             <label for="q-ksm">ksm_governor</label>
             <select id="q-ksm">
-              <option value="auto" selected>auto (ksmd >= 2 VMs)</option>
+              <option value="proactive" selected>proactive (burst on spawn + NUMA local)</option>
+              <option value="auto">auto (ksmd &gt;= 2 VMs)</option>
               <option value="on">on (always scan)</option>
               <option value="off">off (read-only)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="q-prewarm">disk_prewarm</label>
+            <select id="q-prewarm">
+              <option value="auto" selected>auto (warm on boot)</option>
+              <option value="eager">eager (startup + boot)</option>
+              <option value="off">off</option>
             </select>
           </div>
         </div>

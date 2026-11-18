@@ -7,6 +7,7 @@ import (
 
 	"github.com/SalyyS1/omnivm/internal/lifecycle"
 	"github.com/SalyyS1/omnivm/internal/router"
+	"github.com/SalyyS1/omnivm/internal/telemetry"
 	"github.com/SalyyS1/omnivm/internal/version"
 )
 
@@ -108,6 +109,15 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 		ksmActiveVal = 1
 	}
 	writeGauge("omnivm_ksm_active", "Whether the Linux ksmd page scanner is currently active (1=scanning, 0=paused).", ksmActiveVal)
+	writeCounter("omnivm_ksm_burst_activations", "Total proactive burst deduplication passes activated by VM spawn events.", resMetrics.KSMBurstActivations)
+	writeCounter("omnivm_ksm_volatile_backoffs", "Total scan throttle backoff passes triggered by volatile heap page churn.", resMetrics.KSMVolatileBackoffs)
+	writeGauge("omnivm_ksm_scan_rate_pages_per_sec", "Current effective KSM candidate scan rate in pages per second.", int64(resMetrics.KSMScanRatePagesPerSec))
+	fmt.Fprintf(&b, "# HELP omnivm_ksm_dedup_ratio Ratio of duplicate shared pages to total unique candidate pages.\n")
+	fmt.Fprintf(&b, "# TYPE omnivm_ksm_dedup_ratio gauge\n")
+	fmt.Fprintf(&b, "omnivm_ksm_dedup_ratio %.4f\n", resMetrics.KSMDedupRatio)
+	fmt.Fprintf(&b, "# HELP omnivm_ksm_volatile_ratio Ratio of volatile mutating pages to candidate scan pages.\n")
+	fmt.Fprintf(&b, "# TYPE omnivm_ksm_volatile_ratio gauge\n")
+	fmt.Fprintf(&b, "omnivm_ksm_volatile_ratio %.4f\n", resMetrics.KSMVolatileRatio)
 	writeGauge("omnivm_host_active_vcpus", "Aggregate virtual CPUs assigned to starting and running microVMs.", int64(resMetrics.ActiveVCPUs))
 	writeGauge("omnivm_host_quota_vcpus", "Configured active virtual CPU admission ceiling (0 when unlimited).", int64(resMetrics.MaxActiveVCPUs))
 	writeGauge("omnivm_host_active_vms", "Number of concurrently starting or running microVMs.", int64(resMetrics.ActiveVMs))
@@ -150,6 +160,20 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 	writeCounter("omnivm_lifecycle_snapshot_branches", "Total Copy-on-Write microVM branches spawned from snapshots or live instances.", lmMetrics.SnapshotBranches)
 	writeGauge("omnivm_storage_cow_saved_bytes", "Cumulative host disk bytes saved by Copy-on-Write reflinks and sparse extent cloning.", int64(lmMetrics.CoWSavedBytes))
 	writeGauge("omnivm_lifecycle_active_connections", "Current active HTTP and TCP connections tracked across instances.", int64(lmMetrics.ActiveConnections))
+
+	writeCounter("omnivm_disk_prewarm_passes", "Total page-cache disk pre-warming passes executed ahead of cold boot.", lmMetrics.DiskPrewarm.Passes)
+	writeCounter("omnivm_disk_prewarm_files_warmed", "Total kernel and rootfs files pre-warmed into the page cache.", lmMetrics.DiskPrewarm.FilesWarmed)
+	writeCounter("omnivm_disk_prewarm_cache_hits", "Total pre-warm requests resolved from warm page-cache metadata.", lmMetrics.DiskPrewarm.CacheHits)
+	writeCounter("omnivm_disk_prewarm_warmed_bytes", "Total allocated extent bytes read or fadvised into host page cache.", lmMetrics.DiskPrewarm.WarmedBytes)
+	writeCounter("omnivm_disk_prewarm_sparse_skipped_bytes", "Total sparse unallocated hole bytes skipped in O(1) time.", lmMetrics.DiskPrewarm.SparseSkippedBytes)
+	writeCounter("omnivm_disk_prewarm_duration_microseconds", "Cumulative duration spent in disk pre-warming in microseconds.", lmMetrics.DiskPrewarm.DurationMicrosTotal)
+
+	wakeSeries := []telemetry.LabeledSnapshot{
+		{LabelValue: "cold_boot", Snapshot: lmMetrics.WakeLatency.ColdBoot},
+		{LabelValue: "warm_resume", Snapshot: lmMetrics.WakeLatency.WarmResume},
+		{LabelValue: "coalesced_wait", Snapshot: lmMetrics.WakeLatency.CoalescedWait},
+	}
+	telemetry.WritePrometheusHistogram(&b, "omnivm_wake_latency_seconds", "MicroVM wake and transition latency in seconds partitioned by transition path.", "path", wakeSeries)
 
 	writeGauge("omnivm_router_active_port_proxies", "Number of bound host L4/HTTP port proxy listeners.", int64(rtrMetrics.ActivePortProxies))
 	writeCounter("omnivm_router_http_requests", "Total HTTP ingress requests handled by the main router.", rtrMetrics.HTTPRequests)

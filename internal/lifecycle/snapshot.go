@@ -603,6 +603,9 @@ func (m *Manager) BranchInstance(ctx context.Context, req BranchRequest) (*Insta
 	branchInst := m.CreateInstance(branchID, finalCmd, branchPorts, opts...)
 	m.recordCloneStats(totalStats)
 	atomic.AddUint64(&m.metrics.snapshotBranches, 1)
+	if gov := m.KSMGovernor(); gov != nil {
+		gov.NotifySpawn(1)
+	}
 
 	if req.Start {
 		if err := m.EnsureInstance(ctx, branchID); err != nil {

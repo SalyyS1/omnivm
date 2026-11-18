@@ -414,6 +414,9 @@ func TestPrometheusAndOpenMetricsExposition_AndQuotaHTTP429(t *testing.T) {
 		`omnivm_host_quota_active_vms 1`,
 		`omnivm_lifecycle_cold_starts_total 1`,
 		`omnivm_lifecycle_quota_rejections_total 2`,
+		`omnivm_wake_latency_seconds_bucket{path="cold_boot",le="+Inf"} 1`,
+		`omnivm_disk_prewarm_passes_total`,
+		`omnivm_ksm_burst_activations_total`,
 	}
 	for _, s := range requiredSnippets {
 		if !strings.Contains(promText, s) {

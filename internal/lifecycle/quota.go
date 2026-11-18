@@ -43,6 +43,11 @@ type HostResourceMetrics struct {
 	KSMSavedMemoryMB          int     `json:"ksm_saved_memory_mb"`
 	KSMPagesSharing           uint64  `json:"ksm_pages_sharing"`
 	KSMActive                 bool    `json:"ksm_active"`
+	KSMBurstActivations       uint64  `json:"ksm_burst_activations"`
+	KSMVolatileBackoffs       uint64  `json:"ksm_volatile_backoffs"`
+	KSMScanRatePagesPerSec    uint64  `json:"ksm_scan_rate_pages_per_sec"`
+	KSMDedupRatio             float64 `json:"ksm_dedup_ratio"`
+	KSMVolatileRatio          float64 `json:"ksm_volatile_ratio"`
 	MaxHostMemoryMB           int     `json:"max_host_memory_mb"`
 	ActiveVCPUs               int     `json:"active_vcpus"`
 	MaxActiveVCPUs            int     `json:"max_active_vcpus"`
@@ -118,6 +123,11 @@ func (m *Manager) HostResources() HostResourceMetrics {
 		out.KSMSavedMemoryMB = km.SavedMB
 		out.KSMPagesSharing = km.PagesSharing
 		out.KSMActive = km.Active
+		out.KSMBurstActivations = km.BurstActivations
+		out.KSMVolatileBackoffs = km.VolatileBackoffs
+		out.KSMScanRatePagesPerSec = km.ScanRatePagesPerSec
+		out.KSMDedupRatio = km.DedupRatio
+		out.KSMVolatileRatio = km.VolatileRatio
 	}
 	effective := out.ResidentMemoryMB - out.KSMSavedMemoryMB
 	if effective < 0 {

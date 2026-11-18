@@ -56,6 +56,9 @@ func TestGovernor_OffModeNeverMutatesSysfs(t *testing.T) {
 	if res.Metrics.SavedMB != 16 || res.Metrics.SavedBytes != 16*1024*1024 {
 		t.Fatalf("SavedMB = %d (%d bytes), want 16 MiB", res.Metrics.SavedMB, res.Metrics.SavedBytes)
 	}
+	if res.Metrics.DedupRatio != 0.8 {
+		t.Errorf("DedupRatio = %v, want 0.8 (4096 / 5120)", res.Metrics.DedupRatio)
+	}
 }
 
 func TestGovernor_AutoZeroOverheadPauseAndConvergenceBackoff(t *testing.T) {
@@ -115,8 +118,80 @@ func TestGovernor_AutoZeroOverheadPauseAndConvergenceBackoff(t *testing.T) {
 	}
 }
 
+func TestGovernor_ProactiveBurstDensityScalingNUMAAndVolatileBackoff(t *testing.T) {
+	dir := setupSyntheticKSM(t, map[string]uint64{
+		"run":                0,
+		"pages_shared":       256,
+		"pages_sharing":      0,
+		"pages_unshared":     512,
+		"pages_volatile":     0,
+		"full_scans":         1,
+		"pages_to_scan":      100,
+		"sleep_millisecs":    100,
+		"merge_across_nodes": 1,
+	})
+
+	gov := NewGovernor(dir, ModeProactive, 4096)
+	if !IsValidMode("proactive") || gov.Mode() != ModeProactive {
+		t.Fatalf("expected ModeProactive, got %q", gov.Mode())
+	}
+
+	// 1. NotifySpawn(1) + 1st VM cold boot: pre-indexes base VM pages for 1 burst pass
+	// and pins merge_across_nodes=0 while run==0.
+	gov.NotifySpawn(1)
+	r1 := gov.Reconcile(1)
+	if r1.Run != 1 || r1.Phase != PhaseProactiveBurst || r1.SleepMillisecs != burstSleepMillisecs {
+		t.Fatalf("expected 1st VM proactive pre-index burst, got %+v", r1)
+	}
+	if r1.Metrics.MergeAcrossNodes != 0 {
+		t.Errorf("MergeAcrossNodes = %d, want 0 (NUMA-local pin)", r1.Metrics.MergeAcrossNodes)
+	}
+	if r1.PagesToScan != 512 {
+		t.Errorf("PagesToScan = %d, want 512", r1.PagesToScan)
+	}
+
+	// If no 2nd VM arrives on the next pass, ksmd pauses back to run=0 (zero steady CPU overhead).
+	r1Idle := gov.Reconcile(1)
+	if r1Idle.Run != 0 || r1Idle.Phase != PhasePaused {
+		t.Fatalf("expected pause on 2nd single-VM pass, got %+v", r1Idle)
+	}
+
+	// 2. Branch storm of 4 VMs arrives (total 5 resident VMs): density-scaled burst (5 * 256 = 1280 pages @ 20ms).
+	gov.NotifySpawn(4)
+	r2 := gov.Reconcile(5)
+	if r2.Run != 1 || r2.Phase != PhaseProactiveBurst || r2.PagesToScan != 1280 || r2.SleepMillisecs != burstSleepMillisecs {
+		t.Fatalf("expected density-scaled burst (1280 pages @ 20ms), got %+v", r2)
+	}
+	if r2.Metrics.ScanRatePagesPerSec != 64000 {
+		t.Errorf("ScanRatePagesPerSec = %d, want 64000", r2.Metrics.ScanRatePagesPerSec)
+	}
+
+	// 3. Simulate volatile-page thrashing (pages_volatile dominates >50% while sharing stalls across scan #2).
+	writeKSMFile(t, dir, "pages_shared", 500)
+	writeKSMFile(t, dir, "pages_sharing", 2000)
+	writeKSMFile(t, dir, "pages_unshared", 500)
+	writeKSMFile(t, dir, "pages_volatile", 4500) // 4500 / 7500 = 0.60 volatile ratio
+	writeKSMFile(t, dir, "full_scans", 2)
+	// Record baseline at scan #2
+	_ = gov.Reconcile(5)
+
+	// Advance to scan #3 with zero sharing growth while volatile pages remain 60%.
+	writeKSMFile(t, dir, "full_scans", 3)
+	rBackoff := gov.Reconcile(5)
+	if rBackoff.Phase != PhaseVolatileBackoff {
+		t.Fatalf("expected PhaseVolatileBackoff, got %q (%+v)", rBackoff.Phase, rBackoff)
+	}
+	if rBackoff.SleepMillisecs != backoffSleepMillisecs || rBackoff.PagesToScan != volatilePagesToScan {
+		t.Errorf("expected backoff sleep=%dms pages=%d, got sleep=%dms pages=%d",
+			backoffSleepMillisecs, volatilePagesToScan, rBackoff.SleepMillisecs, rBackoff.PagesToScan)
+	}
+	if rBackoff.Metrics.VolatileBackoffs != 1 || rBackoff.Metrics.VolatileRatio != 0.6 {
+		t.Errorf("unexpected volatile backoff telemetry: %+v", rBackoff.Metrics)
+	}
+}
+
 func TestGovernor_UnavailableSysfsGraceful(t *testing.T) {
-	gov := NewGovernor(filepath.Join(t.TempDir(), "missing-ksm"), ModeAuto, 4096)
+	gov := NewGovernor(filepath.Join(t.TempDir(), "missing-ksm"), ModeProactive, 4096)
 	m := gov.ReadMetrics()
 	if m.Available {
 		t.Fatal("expected Available=false for missing sysfs directory")

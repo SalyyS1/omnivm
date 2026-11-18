@@ -99,12 +99,24 @@ type Config struct {
 
 	// KSMGovernor controls the Linux Kernel Samepage Merging governor mode:
 	// "off" (read-only sysfs telemetry, default), "auto" (zero-overhead ksmd
-	// activation when >= 2 VMs are resident), or "on". Set via OVM_KSM_GOVERNOR.
+	// activation when >= 2 VMs are resident), "proactive" (spawn-burst scaling,
+	// NUMA-local pinning, and volatile-page churn backoff), or "on".
+	// Set via OVM_KSM_GOVERNOR.
 	KSMGovernor string
 
 	// MemoryDedup enables MADV_MERGEABLE anonymous guest RAM hints when
 	// virtiofs shared DMA is not attached. Set via OVM_MEMORY_DEDUP (default true).
 	MemoryDedup bool
+
+	// DiskPrewarm controls sparse-extent page-cache pre-warming for kernel and
+	// rootfs artifacts ahead of cold boot: "auto" (pre-warm on cold boot, default),
+	// "eager" (pre-warm kernel and persisted snapshots at ovmd startup + cold boot),
+	// or "off". Set via OVM_DISK_PREWARM.
+	DiskPrewarm string
+
+	// DiskPrewarmBudgetMB caps page-cache pre-warming bytes per pass in MiB
+	// (0 uses the 256 MiB default). Set via OVM_DISK_PREWARM_BUDGET_MB.
+	DiskPrewarmBudgetMB int
 
 	// CgroupGovernor controls the Linux cgroup v2 memory.high watermark governor:
 	// "off" (read-only telemetry, default), "static", or "adaptive".
@@ -139,6 +151,10 @@ func DefaultConfig() *Config {
 	if cgroupMode == "" {
 		cgroupMode = "off"
 	}
+	diskPrewarm := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_DISK_PREWARM")))
+	if diskPrewarm == "" {
+		diskPrewarm = "auto"
+	}
 
 	return &Config{
 		DataDir:               filepath.Join(ovmDir, "data"),
@@ -166,6 +182,8 @@ func DefaultConfig() *Config {
 		MaxActiveVMs:          parseOptionalEnvInt("OVM_MAX_ACTIVE_VMS"),
 		KSMGovernor:           ksmMode,
 		MemoryDedup:           parseOptionalEnvBool("OVM_MEMORY_DEDUP", true),
+		DiskPrewarm:           diskPrewarm,
+		DiskPrewarmBudgetMB:   parseOptionalEnvInt("OVM_DISK_PREWARM_BUDGET_MB"),
 		CgroupGovernor:        cgroupMode,
 		CgroupMemoryHighRatio: parseOptionalEnvFloat("OVM_CGROUP_MEMORY_HIGH_RATIO"),
 	}
@@ -270,9 +288,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported network_backend %q: expected auto or tap", c.NetworkBackend)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.KSMGovernor)) {
-	case "", "off", "auto", "on":
+	case "", "off", "auto", "proactive", "on":
 	default:
-		return fmt.Errorf("unsupported ksm_governor %q: expected off, auto, or on", c.KSMGovernor)
+		return fmt.Errorf("unsupported ksm_governor %q: expected off, auto, proactive, or on", c.KSMGovernor)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.DiskPrewarm)) {
+	case "", "off", "auto", "eager":
+	default:
+		return fmt.Errorf("unsupported disk_prewarm %q: expected off, auto, or eager", c.DiskPrewarm)
+	}
+	if c.DiskPrewarmBudgetMB < 0 || c.DiskPrewarmBudgetMB > 64*1024 {
+		return fmt.Errorf("disk_prewarm_budget_mb must be between 0 and %d, got %d", 64*1024, c.DiskPrewarmBudgetMB)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.CgroupGovernor)) {
 	case "", "off", "static", "adaptive":

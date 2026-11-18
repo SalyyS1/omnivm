@@ -28,12 +28,14 @@ import (
 
 	"github.com/SalyyS1/omnivm/internal/cgroup"
 	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/diskwarm"
 	"github.com/SalyyS1/omnivm/internal/image"
 	"github.com/SalyyS1/omnivm/internal/ksm"
 	"github.com/SalyyS1/omnivm/internal/logstore"
 	"github.com/SalyyS1/omnivm/internal/overlay"
 	"github.com/SalyyS1/omnivm/internal/registry"
 	"github.com/SalyyS1/omnivm/internal/secrets"
+	"github.com/SalyyS1/omnivm/internal/telemetry"
 	"github.com/SalyyS1/omnivm/internal/tether"
 	"github.com/SalyyS1/omnivm/internal/vmm"
 )
@@ -293,22 +295,31 @@ type InstanceStateCounts struct {
 	Disabled int `json:"disabled"`
 }
 
-// LifecycleMetrics exposes atomic counters and live gauges for scale-to-zero operations.
+// WakeLatencyMetrics holds latency histograms across microVM wake paths.
+type WakeLatencyMetrics struct {
+	ColdBoot      telemetry.HistogramSnapshot `json:"cold_boot"`
+	WarmResume    telemetry.HistogramSnapshot `json:"warm_resume"`
+	CoalescedWait telemetry.HistogramSnapshot `json:"coalesced_wait"`
+}
+
+// LifecycleMetrics exposes atomic counters, latency histograms, and live gauges for scale-to-zero operations.
 type LifecycleMetrics struct {
-	ColdStarts        uint64 `json:"cold_starts"`
-	BootFailures      uint64 `json:"boot_failures"`
-	WarmResumes       uint64 `json:"warm_resumes"`
-	CoalescedWakes    uint64 `json:"coalesced_wakes"`
-	ReapWakeHandoffs  uint64 `json:"reap_wake_handoffs"`
-	IdlePauses        uint64 `json:"idle_pauses"`
-	AbortedPauses     uint64 `json:"aborted_pauses"`
-	IdleStops         uint64 `json:"idle_stops"`
-	PausedEvictions   uint64 `json:"paused_evictions"`
-	QuotaRejections   uint64 `json:"quota_rejections"`
-	SnapshotsCreated  uint64 `json:"snapshots_created"`
-	SnapshotBranches  uint64 `json:"snapshot_branches"`
-	CoWSavedBytes     uint64 `json:"cow_saved_bytes"`
-	ActiveConnections int    `json:"active_connections"`
+	ColdStarts        uint64             `json:"cold_starts"`
+	BootFailures      uint64             `json:"boot_failures"`
+	WarmResumes       uint64             `json:"warm_resumes"`
+	CoalescedWakes    uint64             `json:"coalesced_wakes"`
+	ReapWakeHandoffs  uint64             `json:"reap_wake_handoffs"`
+	IdlePauses        uint64             `json:"idle_pauses"`
+	AbortedPauses     uint64             `json:"aborted_pauses"`
+	IdleStops         uint64             `json:"idle_stops"`
+	PausedEvictions   uint64             `json:"paused_evictions"`
+	QuotaRejections   uint64             `json:"quota_rejections"`
+	SnapshotsCreated  uint64             `json:"snapshots_created"`
+	SnapshotBranches  uint64             `json:"snapshot_branches"`
+	CoWSavedBytes     uint64             `json:"cow_saved_bytes"`
+	ActiveConnections int                `json:"active_connections"`
+	DiskPrewarm       diskwarm.Metrics   `json:"disk_prewarm"`
+	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 
 type lifecycleCounters struct {
@@ -378,6 +389,11 @@ type Manager struct {
 	tetherStore *tether.Store
 	ksmGov      *ksm.Governor
 	cgroupGov   *cgroup.Governor
+	diskWarmer  *diskwarm.Warmer
+
+	coldBootHist      *telemetry.Histogram
+	warmResumeHist    *telemetry.Histogram
+	coalescedWaitHist *telemetry.Histogram
 
 	metrics lifecycleCounters
 
@@ -394,7 +410,9 @@ type Manager struct {
 func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *image.Cache, ov overlay.Overlay) *Manager {
 	ksmMode := ksm.ModeOff
 	cgroupMode := cgroup.ModeOff
+	diskWarmMode := diskwarm.ModeAuto
 	var cgroupRatio float64
+	var diskWarmBudget uint64
 	if cfg != nil {
 		if cfg.KSMGovernor != "" {
 			ksmMode = cfg.KSMGovernor
@@ -402,19 +420,64 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		if cfg.CgroupGovernor != "" {
 			cgroupMode = cfg.CgroupGovernor
 		}
+		if cfg.DiskPrewarm != "" {
+			diskWarmMode = cfg.DiskPrewarm
+		}
+		if cfg.DiskPrewarmBudgetMB > 0 {
+			diskWarmBudget = uint64(cfg.DiskPrewarmBudgetMB) * 1024 * 1024
+		}
 		cgroupRatio = cfg.CgroupMemoryHighRatio
 	}
 	return &Manager{
-		instances:  make(map[string]*Instance),
-		snapshots:  make(map[string]*Snapshot),
-		vmm:        v,
-		cfg:        cfg,
-		logStore:   ls,
-		imageCache: imgCache,
-		overlay:    ov,
-		ksmGov:     ksm.NewGovernor("", ksmMode, 0),
-		cgroupGov:  cgroup.NewGovernor("", cgroupMode, cgroupRatio),
+		instances:         make(map[string]*Instance),
+		snapshots:         make(map[string]*Snapshot),
+		vmm:               v,
+		cfg:               cfg,
+		logStore:          ls,
+		imageCache:        imgCache,
+		overlay:           ov,
+		ksmGov:            ksm.NewGovernor("", ksmMode, 0),
+		cgroupGov:         cgroup.NewGovernor("", cgroupMode, cgroupRatio),
+		diskWarmer:        diskwarm.NewWarmer(diskwarm.Config{Mode: diskWarmMode, BudgetBytes: diskWarmBudget}),
+		coldBootHist:      telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
+		warmResumeHist:    telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
+		coalescedWaitHist: telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 	}
+}
+
+// SetDiskWarmer overrides the page-cache disk warmer (e.g. for testing).
+func (m *Manager) SetDiskWarmer(w *diskwarm.Warmer) {
+	m.mu.Lock()
+	m.diskWarmer = w
+	m.mu.Unlock()
+}
+
+// DiskWarmer returns the active page-cache disk warmer.
+func (m *Manager) DiskWarmer() *diskwarm.Warmer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.diskWarmer
+}
+
+// PrewarmSnapshots warms the configured guest kernel and persisted snapshot root disks
+// into the Linux page cache up to the configured disk-prewarm budget.
+func (m *Manager) PrewarmSnapshots(ctx context.Context) []diskwarm.WarmReport {
+	dw := m.DiskWarmer()
+	if dw == nil || dw.Mode() == diskwarm.ModeOff {
+		return nil
+	}
+	var paths []string
+	if m.cfg != nil && m.cfg.KernelPath != "" {
+		paths = append(paths, m.cfg.KernelPath)
+	}
+	m.mu.Lock()
+	for _, snap := range m.snapshots {
+		if snap != nil && snap.RootfsPath != "" {
+			paths = append(paths, snap.RootfsPath)
+		}
+	}
+	m.mu.Unlock()
+	return dw.WarmBootArtifacts(ctx, paths...)
 }
 
 // SetCgroupGovernor overrides the cgroup v2 watermark governor (e.g. for testing).
@@ -482,6 +545,20 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		activeConns += inst.activeConns
 		inst.mu.Unlock()
 	}
+	var dwMetrics diskwarm.Metrics
+	if dw := m.DiskWarmer(); dw != nil {
+		dwMetrics = dw.Metrics()
+	}
+	var wakeLatency WakeLatencyMetrics
+	if m.coldBootHist != nil {
+		wakeLatency.ColdBoot = m.coldBootHist.Snapshot()
+	}
+	if m.warmResumeHist != nil {
+		wakeLatency.WarmResume = m.warmResumeHist.Snapshot()
+	}
+	if m.coalescedWaitHist != nil {
+		wakeLatency.CoalescedWait = m.coalescedWaitHist.Snapshot()
+	}
 	return LifecycleMetrics{
 		ColdStarts:        atomic.LoadUint64(&m.metrics.coldStarts),
 		BootFailures:      atomic.LoadUint64(&m.metrics.bootFailures),
@@ -497,6 +574,8 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		SnapshotBranches:  atomic.LoadUint64(&m.metrics.snapshotBranches),
 		CoWSavedBytes:     m.cowSavedBytesTotal(),
 		ActiveConnections: activeConns,
+		DiskPrewarm:       dwMetrics,
+		WakeLatency:       wakeLatency,
 	}
 }
 
@@ -841,6 +920,7 @@ func (m *Manager) ensureInstanceLoop(ctx context.Context, inst *Instance, forceE
 				atomic.AddUint64(&m.metrics.coalescedWakes, 1)
 			}
 			wasStartingOrResuming := (inst.State == StateStarting || inst.resuming) && !inst.reaping
+			waitStart := time.Now()
 			waitCh := inst.waitChanLocked()
 			inst.mu.Unlock()
 
@@ -848,6 +928,10 @@ func (m *Manager) ensureInstanceLoop(ctx context.Context, inst *Instance, forceE
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-waitCh:
+			}
+
+			if coalescedRecorded && m.coalescedWaitHist != nil {
+				m.coalescedWaitHist.ObserveDuration(time.Since(waitStart))
 			}
 
 			if wasStartingOrResuming {
@@ -911,6 +995,7 @@ func (m *Manager) finishBootFromStarting(
 	wsPath string,
 	exposePortsSnapshot []vmm.PortExpose,
 ) error {
+	bootStart := time.Now()
 	m.notifyStateChange(inst.ID, StateStarting)
 
 	failBoot := func(err error) error {
@@ -1006,6 +1091,20 @@ func (m *Manager) finishBootFromStarting(
 	exposePortsSnapshot = make([]vmm.PortExpose, len(inst.ExposePorts))
 	copy(exposePortsSnapshot, inst.ExposePorts)
 	inst.mu.Unlock()
+
+	// Pre-warm guest kernel and rootfs extents into the Linux page cache ahead of cold boot.
+	if dw := m.DiskWarmer(); dw != nil && dw.Mode() != diskwarm.ModeOff {
+		var toWarm []string
+		if m.cfg != nil && m.cfg.KernelPath != "" {
+			toWarm = append(toWarm, m.cfg.KernelPath)
+		}
+		if rootfsPath != "" {
+			toWarm = append(toWarm, rootfsPath)
+		}
+		if len(toWarm) > 0 {
+			dw.WarmBootArtifacts(ctx, toWarm...)
+		}
+	}
 
 	vmCfg := vmm.VMConfig{
 		Rootfs: vmm.RootFS{
@@ -1294,6 +1393,12 @@ func (m *Manager) finishBootFromStarting(
 	}
 
 	atomic.AddUint64(&m.metrics.coldStarts, 1)
+	if m.coldBootHist != nil {
+		m.coldBootHist.ObserveDuration(time.Since(bootStart))
+	}
+	if gov := m.KSMGovernor(); gov != nil {
+		gov.NotifySpawn(1)
+	}
 	m.notifyStateChange(inst.ID, StateRunning)
 	m.startIdleTimer(inst)
 	log.Printf("instance %s: running (endpoints: %v)", inst.ID, currentEndpoints)
@@ -1389,6 +1494,7 @@ func (m *Manager) resumeInstance(inst *Instance) error {
 }
 
 func (m *Manager) finishResume(inst *Instance, handle vmm.Handle) error {
+	resumeStart := time.Now()
 	log.Printf("instance %s: resuming (SIGCONT)", inst.ID)
 	if err := m.vmm.ResumeVM(handle); err != nil {
 		wErr := fmt.Errorf("resume VM: %w", err)
@@ -1401,6 +1507,9 @@ func (m *Manager) finishResume(inst *Instance, handle vmm.Handle) error {
 	}
 
 	atomic.AddUint64(&m.metrics.warmResumes, 1)
+	if m.warmResumeHist != nil {
+		m.warmResumeHist.ObserveDuration(time.Since(resumeStart))
+	}
 	now := time.Now()
 	inst.mu.Lock()
 	inst.resuming = false

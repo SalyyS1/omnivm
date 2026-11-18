@@ -144,6 +144,11 @@ type HostResourceMetrics struct {
 	KSMSavedMemoryMB          int     `json:"ksm_saved_memory_mb"`
 	KSMPagesSharing           uint64  `json:"ksm_pages_sharing"`
 	KSMActive                 bool    `json:"ksm_active"`
+	KSMBurstActivations       uint64  `json:"ksm_burst_activations"`
+	KSMVolatileBackoffs       uint64  `json:"ksm_volatile_backoffs"`
+	KSMScanRatePagesPerSec    uint64  `json:"ksm_scan_rate_pages_per_sec"`
+	KSMDedupRatio             float64 `json:"ksm_dedup_ratio"`
+	KSMVolatileRatio          float64 `json:"ksm_volatile_ratio"`
 	MaxHostMemoryMB           int     `json:"max_host_memory_mb"`
 	ActiveVCPUs               int     `json:"active_vcpus"`
 	MaxActiveVCPUs            int     `json:"max_active_vcpus"`
@@ -161,22 +166,54 @@ type HostResourceMetrics struct {
 	CgroupPSIFullTotalMicros  uint64  `json:"cgroup_psi_full_total_micros"`
 }
 
+// DiskPrewarmMetrics reports cumulative page-cache pre-warming counters.
+type DiskPrewarmMetrics struct {
+	Mode                string `json:"mode"`
+	Passes              uint64 `json:"passes"`
+	FilesWarmed         uint64 `json:"files_warmed"`
+	CacheHits           uint64 `json:"cache_hits"`
+	WarmedBytes         uint64 `json:"warmed_bytes"`
+	SparseSkippedBytes  uint64 `json:"sparse_skipped_bytes"`
+	DurationMicrosTotal uint64 `json:"duration_micros_total"`
+}
+
+// WakeLatencySummary captures summary latency percentiles for a wake path.
+type WakeLatencySummary struct {
+	Count  uint64  `json:"count"`
+	SumMs  float64 `json:"sum_ms"`
+	MinMs  float64 `json:"min_ms"`
+	P50Ms  float64 `json:"p50_ms"`
+	P95Ms  float64 `json:"p95_ms"`
+	P99Ms  float64 `json:"p99_ms"`
+	MaxMs  float64 `json:"max_ms"`
+	MeanMs float64 `json:"mean_ms"`
+}
+
+// WakeLatencyMetrics holds latency summaries across microVM wake paths.
+type WakeLatencyMetrics struct {
+	ColdBoot      WakeLatencySummary `json:"cold_boot"`
+	WarmResume    WakeLatencySummary `json:"warm_resume"`
+	CoalescedWait WakeLatencySummary `json:"coalesced_wait"`
+}
+
 // LifecycleMetrics holds scale-to-zero lifecycle counters.
 type LifecycleMetrics struct {
-	ColdStarts        uint64 `json:"cold_starts"`
-	BootFailures      uint64 `json:"boot_failures"`
-	WarmResumes       uint64 `json:"warm_resumes"`
-	CoalescedWakes    uint64 `json:"coalesced_wakes"`
-	ReapWakeHandoffs  uint64 `json:"reap_wake_handoffs"`
-	IdlePauses        uint64 `json:"idle_pauses"`
-	AbortedPauses     uint64 `json:"aborted_pauses"`
-	IdleStops         uint64 `json:"idle_stops"`
-	PausedEvictions   uint64 `json:"paused_evictions"`
-	QuotaRejections   uint64 `json:"quota_rejections"`
-	SnapshotsCreated  uint64 `json:"snapshots_created"`
-	SnapshotBranches  uint64 `json:"snapshot_branches"`
-	CoWSavedBytes     uint64 `json:"cow_saved_bytes"`
-	ActiveConnections int    `json:"active_connections"`
+	ColdStarts        uint64             `json:"cold_starts"`
+	BootFailures      uint64             `json:"boot_failures"`
+	WarmResumes       uint64             `json:"warm_resumes"`
+	CoalescedWakes    uint64             `json:"coalesced_wakes"`
+	ReapWakeHandoffs  uint64             `json:"reap_wake_handoffs"`
+	IdlePauses        uint64             `json:"idle_pauses"`
+	AbortedPauses     uint64             `json:"aborted_pauses"`
+	IdleStops         uint64             `json:"idle_stops"`
+	PausedEvictions   uint64             `json:"paused_evictions"`
+	QuotaRejections   uint64             `json:"quota_rejections"`
+	SnapshotsCreated  uint64             `json:"snapshots_created"`
+	SnapshotBranches  uint64             `json:"snapshot_branches"`
+	CoWSavedBytes     uint64             `json:"cow_saved_bytes"`
+	ActiveConnections int                `json:"active_connections"`
+	DiskPrewarm       DiskPrewarmMetrics `json:"disk_prewarm"`
+	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 
 // Snapshot represents an immutable microVM disk and workspace checkpoint.

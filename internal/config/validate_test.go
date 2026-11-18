@@ -139,6 +139,14 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "cgroup_ratio_too_high",
 			mutate: func(c *Config) { c.CgroupMemoryHighRatio = 1.05 },
 		},
+		{
+			name:   "invalid_disk_prewarm_mode",
+			mutate: func(c *Config) { c.DiskPrewarm = "magic" },
+		},
+		{
+			name:   "negative_disk_prewarm_budget",
+			mutate: func(c *Config) { c.DiskPrewarmBudgetMB = -10 },
+		},
 	}
 
 	for _, tc := range tests {
@@ -161,7 +169,9 @@ func TestConfigValidate_EdgeValidCases(t *testing.T) {
 	cfg.MaxDiskMB = 512
 	cfg.NetworkBackend = "tap"
 	cfg.DNSServer = ""
-	cfg.KSMGovernor = "auto"
+	cfg.KSMGovernor = "proactive"
+	cfg.DiskPrewarm = "eager"
+	cfg.DiskPrewarmBudgetMB = 512
 	cfg.MemoryDedup = false
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected valid edge config, got error: %v", err)

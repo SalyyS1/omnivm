@@ -74,6 +74,12 @@ AI evaluation harnesses and speculative code-execution pipelines frequently fork
 - **Automated Warm-Pool Page Pre-Faulting and Benchmark (`internal/prefault` + `ovm bench prefault`)**: Populates anonymous guest memory pools and `mmap` snapshot images ahead of wake via Linux `MADV_POPULATE_WRITE` / `MADV_POPULATE_READ` (`MADV_WILLNEED` + parallel page-stride worker fallback), eliminating first-touch minor page faults (`minflt=0` on warm slots) and exposing `ovm bench prefault [--json]` plus `POST /v1/bench/prefault`.
 - **Live MicroVM Migration and Per-VM Network Namespace Isolation (`internal/migration`, `internal/netns`)**: Iterative dirty-bitmap pre-copy and optional post-copy live migration (`POST /v1/instances/{id}/migrate`, `ovm instance migrate`) alongside isolated `/run/netns/ovm-<id>` veth pairs with `/30` subnet allocation.
 
+## Proactive KSM Governor, Disk-Cache Pre-Warming, and Wake Latency Histograms (`v0.7.0`)
+
+- **Proactive KSM Memory Governor (`internal/ksm`)**: Extends kernel samepage deduplication with fleet-density burst scaling (`OVM_KSM_GOVERNOR=proactive`). Pre-indexes guest memory pages on cold-boot and branch spawn events (`NotifySpawn`), scales `pages_to_scan` dynamically with active VM count (up to 2048 pages per 20ms burst), pins NUMA socket-local deduplication (`merge_across_nodes=0`), and automatically throttles scan intervals to 500ms when volatile heap page churn exceeds 50%.
+- **Sparse-Extent Disk-Cache Pre-Warming (`internal/diskwarm`)**: Pre-warms guest kernel images (`vmlinux`) and rootfs extents ahead of cold boot (`OVM_DISK_PREWARM=auto|eager|off`). Discovers allocated blocks via `SEEK_DATA`/`SEEK_HOLE` in O(1) time to bypass gigabytes of unallocated sparse holes, issuing `POSIX_FADV_WILLNEED` exclusively against physical blocks within a bounded budget (`OVM_DISK_PREWARM_BUDGET_MB`).
+- **Prometheus 0.0.4 and OpenMetrics 1.0.0 Wake Latency Histograms (`internal/telemetry`)**: Implements thread-safe cumulative latency histograms for `cold_boot`, `warm_resume`, and `coalesced_wait` transitions (`omnivm_wake_latency_seconds`), plus cumulative counters for page-cache pre-warming and proactive KSM scan efficiency.
+
 ## Quick Start
 
 ### Prerequisites
