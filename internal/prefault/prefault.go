@@ -157,6 +157,7 @@ func parallelStrideTouch(ctx context.Context, buf []byte, pageSize int, workers 
 				offset := p * pageSize
 				b := buf[offset]
 				if writable {
+					buf[offset] = b ^ 1
 					buf[offset] = b
 				} else {
 					localAcc += uint64(b)
