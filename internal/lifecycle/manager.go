@@ -30,6 +30,7 @@ import (
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/diskwarm"
 	"github.com/SalyyS1/omnivm/internal/image"
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/ksm"
 	"github.com/SalyyS1/omnivm/internal/logstore"
 	"github.com/SalyyS1/omnivm/internal/overlay"
@@ -115,6 +116,10 @@ type Instance struct {
 	SourceSnapshotID string           // ID of the snapshot this instance was branched from (empty = fresh)
 	Capabilities     *CapabilityToken // spawn capabilities (nil = no guest API spawning)
 
+	// Multi-tenant I/O QoS membership and per-instance overrides
+	TenantID string
+	IOQoS    *ioqos.InstancePolicy
+
 	// Keepalive lease - prevents pause while held, auto-expires after TTL
 	leaseHeld   bool
 	leaseExpiry time.Time
@@ -166,6 +171,8 @@ type InstanceSnapshot struct {
 	IdlePolicy        string
 	ParentID          string
 	SourceSnapshotID  string
+	TenantID          string
+	IOQoS             *ioqos.InstancePolicy
 	ActiveConnections int
 	LastActivity      time.Time
 	LeaseHeld         bool
@@ -253,6 +260,11 @@ func (inst *Instance) Snapshot() InstanceSnapshot {
 		secretsCopy = make([]string, len(inst.SecretKeys))
 		copy(secretsCopy, inst.SecretKeys)
 	}
+	var qosCopy *ioqos.InstancePolicy
+	if inst.IOQoS != nil {
+		cp := *inst.IOQoS
+		qosCopy = &cp
+	}
 
 	return InstanceSnapshot{
 		ID:                inst.ID,
@@ -274,6 +286,8 @@ func (inst *Instance) Snapshot() InstanceSnapshot {
 		IdlePolicy:        inst.IdlePolicy,
 		ParentID:          inst.ParentID,
 		SourceSnapshotID:  inst.SourceSnapshotID,
+		TenantID:          inst.TenantID,
+		IOQoS:             qosCopy,
 		ActiveConnections: inst.activeConns,
 		LastActivity:      inst.lastActivity,
 		LeaseHeld:         inst.leaseHeld,
@@ -319,6 +333,7 @@ type LifecycleMetrics struct {
 	CoWSavedBytes     uint64             `json:"cow_saved_bytes"`
 	ActiveConnections int                `json:"active_connections"`
 	DiskPrewarm       diskwarm.Metrics   `json:"disk_prewarm"`
+	IOQoS             ioqos.Metrics      `json:"io_qos"`
 	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 
@@ -390,6 +405,7 @@ type Manager struct {
 	ksmGov      *ksm.Governor
 	cgroupGov   *cgroup.Governor
 	diskWarmer  *diskwarm.Warmer
+	ioqosGov    *ioqos.Governor
 
 	coldBootHist      *telemetry.Histogram
 	warmResumeHist    *telemetry.Histogram
@@ -411,8 +427,10 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 	ksmMode := ksm.ModeOff
 	cgroupMode := cgroup.ModeOff
 	diskWarmMode := diskwarm.ModeAuto
+	ioqosMode := ioqos.ModeOff
 	var cgroupRatio float64
 	var diskWarmBudget uint64
+	var defTenantPol ioqos.TenantPolicy
 	if cfg != nil {
 		if cfg.KSMGovernor != "" {
 			ksmMode = cfg.KSMGovernor
@@ -427,6 +445,16 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 			diskWarmBudget = uint64(cfg.DiskPrewarmBudgetMB) * 1024 * 1024
 		}
 		cgroupRatio = cfg.CgroupMemoryHighRatio
+		if cfg.IOQoSGovernor != "" {
+			ioqosMode = cfg.IOQoSGovernor
+		}
+		defTenantPol = ioqos.TenantPolicy{
+			TenantID:   ioqos.DefaultTenantID,
+			MaxBlkMBps: cfg.TenantBlkMBps,
+			MaxBlkIOPS: cfg.TenantBlkIOPS,
+			MaxNetMBps: cfg.TenantNetMBps,
+			MaxNetPPS:  cfg.TenantNetPPS,
+		}
 	}
 	return &Manager{
 		instances:         make(map[string]*Instance),
@@ -439,6 +467,7 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		ksmGov:            ksm.NewGovernor("", ksmMode, 0),
 		cgroupGov:         cgroup.NewGovernor("", cgroupMode, cgroupRatio),
 		diskWarmer:        diskwarm.NewWarmer(diskwarm.Config{Mode: diskWarmMode, BudgetBytes: diskWarmBudget}),
+		ioqosGov:          ioqos.NewGovernor(ioqos.Config{Mode: ioqosMode, DefaultPolicy: defTenantPol}),
 		coldBootHist:      telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		warmResumeHist:    telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		coalescedWaitHist: telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
@@ -508,6 +537,20 @@ func (m *Manager) KSMGovernor() *ksm.Governor {
 	return m.ksmGov
 }
 
+// SetIOQoSGovernor overrides the multi-tenant I/O QoS governor (e.g. for testing).
+func (m *Manager) SetIOQoSGovernor(gov *ioqos.Governor) {
+	m.mu.Lock()
+	m.ioqosGov = gov
+	m.mu.Unlock()
+}
+
+// IOQoSGovernor returns the active multi-tenant I/O QoS governor.
+func (m *Manager) IOQoSGovernor() *ioqos.Governor {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ioqosGov
+}
+
 // InstanceCounts returns a race-free breakdown of instances by state.
 func (m *Manager) InstanceCounts() InstanceStateCounts {
 	list := m.ListInstances()
@@ -549,6 +592,10 @@ func (m *Manager) Metrics() LifecycleMetrics {
 	if dw := m.DiskWarmer(); dw != nil {
 		dwMetrics = dw.Metrics()
 	}
+	var qosMetrics ioqos.Metrics
+	if qg := m.IOQoSGovernor(); qg != nil {
+		qosMetrics = qg.Metrics()
+	}
 	var wakeLatency WakeLatencyMetrics
 	if m.coldBootHist != nil {
 		wakeLatency.ColdBoot = m.coldBootHist.Snapshot()
@@ -575,6 +622,7 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		CoWSavedBytes:     m.cowSavedBytesTotal(),
 		ActiveConnections: activeConns,
 		DiskPrewarm:       dwMetrics,
+		IOQoS:             qosMetrics,
 		WakeLatency:       wakeLatency,
 	}
 }
@@ -591,6 +639,12 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 	if inst.Capabilities != nil {
 		if b, err := json.Marshal(inst.Capabilities); err == nil {
 			capsJSON = string(b)
+		}
+	}
+	qosJSON := ""
+	if inst.IOQoS != nil && !inst.IOQoS.IsZero() {
+		if b, err := json.Marshal(inst.IOQoS); err == nil {
+			qosJSON = string(b)
 		}
 	}
 	portInts := make([]int, len(inst.ExposePorts))
@@ -630,6 +684,8 @@ func (m *Manager) saveToRegistry(inst *Instance) {
 		ParentID:         inst.ParentID,
 		SourceSnapshotID: inst.SourceSnapshotID,
 		Capabilities:     capsJSON,
+		TenantID:         inst.TenantID,
+		IOQoS:            qosJSON,
 		CreatedAt:        inst.CreatedAt,
 	}
 	inst.mu.Unlock()
@@ -812,6 +868,25 @@ func WithSourceSnapshotID(id string) InstanceOption {
 func WithCapabilities(caps *CapabilityToken) InstanceOption {
 	return func(inst *Instance) {
 		inst.Capabilities = caps
+	}
+}
+
+// WithTenantID assigns the instance to a multi-tenant QoS tenant bucket.
+func WithTenantID(tenantID string) InstanceOption {
+	return func(inst *Instance) {
+		inst.TenantID = ioqos.NormalizeTenantID(tenantID)
+	}
+}
+
+// WithIOQoS sets per-instance token-bucket I/O ceilings and fair-share weight.
+func WithIOQoS(pol *ioqos.InstancePolicy) InstanceOption {
+	return func(inst *Instance) {
+		if pol == nil {
+			inst.IOQoS = nil
+			return
+		}
+		cp := *pol
+		inst.IOQoS = &cp
 	}
 }
 
@@ -1090,7 +1165,23 @@ func (m *Manager) finishBootFromStarting(
 	inst.mu.Lock()
 	exposePortsSnapshot = make([]vmm.PortExpose, len(inst.ExposePorts))
 	copy(exposePortsSnapshot, inst.ExposePorts)
+	tenantID := inst.TenantID
+	var instQoSPol ioqos.InstancePolicy
+	if inst.IOQoS != nil {
+		instQoSPol = *inst.IOQoS
+	}
 	inst.mu.Unlock()
+
+	var diskRL, netRL map[string]interface{}
+	if qg := m.IOQoSGovernor(); qg != nil {
+		alloc := qg.RegisterInstance(ioqos.InstanceDemand{
+			InstanceID: inst.ID,
+			TenantID:   tenantID,
+			VCPUs:      vcpus,
+			Policy:     instQoSPol,
+		})
+		diskRL, netRL = ioqos.ToCloudHypervisorConfigs(alloc, ioqos.DefaultRefillWindowMs)
+	}
 
 	// Pre-warm guest kernel and rootfs extents into the Linux page cache ahead of cold boot.
 	if dw := m.DiskWarmer(); dw != nil && dw.Mode() != diskwarm.ModeOff {
@@ -1116,6 +1207,8 @@ func (m *Manager) finishBootFromStarting(
 		ExposePorts:     exposePortsSnapshot,
 		WorkspacePath:   wsPath,
 		MergeableMemory: m.cfg != nil && m.cfg.MemoryDedup,
+		DiskRateLimiter: diskRL,
+		NetRateLimiter:  netRL,
 	}
 
 	handle, err := m.vmm.CreateVM(vmCfg)
@@ -2651,6 +2744,32 @@ func (m *Manager) notifyStateChange(id, state string) {
 	if fn != nil {
 		fn(id, state)
 	}
+	m.reconcileIOQoS(inst, id, state)
 	m.reconcileKSM()
 	m.reconcileCgroup()
+}
+
+func (m *Manager) reconcileIOQoS(inst *Instance, id, state string) {
+	qg := m.IOQoSGovernor()
+	if qg == nil {
+		return
+	}
+	if inst == nil || state == StatePaused || state == StateStopped {
+		qg.UnregisterInstance(id)
+		return
+	}
+	inst.mu.Lock()
+	_, vcpus := m.effectiveResourcesLocked(inst)
+	tid := inst.TenantID
+	var pol ioqos.InstancePolicy
+	if inst.IOQoS != nil {
+		pol = *inst.IOQoS
+	}
+	inst.mu.Unlock()
+	qg.RegisterInstance(ioqos.InstanceDemand{
+		InstanceID: id,
+		TenantID:   tid,
+		VCPUs:      vcpus,
+		Policy:     pol,
+	})
 }

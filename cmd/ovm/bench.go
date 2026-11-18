@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/prefault"
 )
 
@@ -20,6 +21,8 @@ func cmdBench() {
 	switch os.Args[2] {
 	case "prefault":
 		cmdBenchPrefault(os.Args[3:])
+	case "ioqos":
+		cmdBenchIOQoS(os.Args[3:])
 	case "help", "--help", "-h":
 		benchUsage()
 	default:
@@ -34,6 +37,7 @@ func benchUsage() {
 
 Subcommands:
   prefault   Benchmark warm-pool page pre-faulting vs demand-paged first touch
+  ioqos      Benchmark multi-tenant token-bucket I/O QoS noisy-neighbor isolation
 
 Options for 'ovm bench prefault':
   --pool-size N      Number of simulated warm microVM slots (default: 4)
@@ -41,7 +45,126 @@ Options for 'ovm bench prefault':
   --workers W        Parallel page-touch worker goroutines (default: GOMAXPROCS, max 8)
   --iterations K     Benchmark rounds (default: 5)
   --strategy NAME    madvise-populate | touch-write | touch-read (default: madvise-populate)
+  --json, -j         Emit structured JSON benchmark report
+
+Options for 'ovm bench ioqos':
+  --tenants N        Total tenants (1 noisy + N-1 latency-sensitive, default: 3)
+  --noisy-vms N      Concurrent microVMs spawned by noisy tenant (default: 4)
+  --blk-mbps MB      Per-tenant virtio-blk ceiling in MiB/s (default: 100)
+  --net-mbps MB      Per-tenant virtio-net ceiling in MiB/s (default: 50)
+  --duration-ms MS   Simulated contention window in ms (default: 2000)
   --json, -j         Emit structured JSON benchmark report`)
+}
+
+func cmdBenchIOQoS(args []string) {
+	var cfg ioqos.BenchmarkConfig
+	jsonOut := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--tenants":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--tenants requires an integer")
+				os.Exit(1)
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 2 {
+				fmt.Fprintf(os.Stderr, "invalid --tenants %q\n", args[i+1])
+				os.Exit(1)
+			}
+			cfg.Tenants = v
+			i++
+		case "--noisy-vms":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--noisy-vms requires an integer")
+				os.Exit(1)
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				fmt.Fprintf(os.Stderr, "invalid --noisy-vms %q\n", args[i+1])
+				os.Exit(1)
+			}
+			cfg.NoisyVMs = v
+			i++
+		case "--blk-mbps":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--blk-mbps requires an integer")
+				os.Exit(1)
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				fmt.Fprintf(os.Stderr, "invalid --blk-mbps %q\n", args[i+1])
+				os.Exit(1)
+			}
+			cfg.TenantBlkMBps = v
+			i++
+		case "--net-mbps":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--net-mbps requires an integer")
+				os.Exit(1)
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				fmt.Fprintf(os.Stderr, "invalid --net-mbps %q\n", args[i+1])
+				os.Exit(1)
+			}
+			cfg.TenantNetMBps = v
+			i++
+		case "--duration-ms":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--duration-ms requires an integer")
+				os.Exit(1)
+			}
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 100 {
+				fmt.Fprintf(os.Stderr, "invalid --duration-ms %q\n", args[i+1])
+				os.Exit(1)
+			}
+			cfg.DurationMs = v
+			i++
+		case "--json", "-j":
+			jsonOut = true
+		case "--help", "-h":
+			benchUsage()
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "unknown flag: %s\n", args[i])
+			benchUsage()
+			os.Exit(1)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rep, err := ioqos.RunBenchmark(ctx, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench ioqos: %v\n", err)
+		os.Exit(1)
+	}
+
+	if jsonOut {
+		out, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
+
+	fmt.Printf("OmniVM Multi-Tenant Token-Bucket I/O QoS Benchmark\n")
+	fmt.Printf("  mode:                 %s (%d tenants, %d noisy VMs, %d ms window)\n",
+		rep.Mode, rep.Tenants, rep.NoisyVMs, rep.DurationMs)
+	fmt.Printf("  tenant ceilings:      blk=%d MiB/s  net=%d MiB/s\n",
+		rep.TenantBlkCeilingMBps, rep.TenantNetCeilingMBps)
+	fmt.Printf("  fairness (Jain):      intra_tenant=%.4f  inter_tenant=%.4f\n",
+		rep.IntraTenantFairnessIndex, rep.InterTenantFairnessIndex)
+	fmt.Printf("  quiet SLO isolated:   zero_throttles=%v  noisy_excess_shed=%.2f%%\n",
+		rep.QuietTenantZeroThrottles, rep.NoisyExcessShedPercent)
+	for _, tr := range rep.TenantResults {
+		fmt.Printf("  [%s] role=%s vms=%d blk=%.1f/%.1f MiB net=%.1f/%.1f MiB throttles=%d slo=%.2f%%\n",
+			tr.TenantID, tr.Role, tr.ActiveVMs,
+			tr.AdmittedBlkMB, tr.RequestedBlkMB,
+			tr.AdmittedNetMB, tr.RequestedNetMB,
+			tr.ThrottledBursts, tr.SLOAttainmentRatio*100)
+	}
 }
 
 func cmdBenchPrefault(args []string) {

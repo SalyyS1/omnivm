@@ -239,6 +239,11 @@ Example `GET /v1/metrics` response:
 
 Key REST endpoints:
 
+- `GET /v1/qos` / `POST /v1/qos/mode` - Multi-tenant token-bucket I/O QoS governor status and mode
+- `PUT /v1/qos/tenants/{tenant}` / `DELETE /v1/qos/tenants/{tenant}` - Tenant virtio-blk and virtio-net rate ceiling configuration
+- `POST /v1/qos/bench` - Run synthetic multi-tenant I/O QoS noisy-neighbor benchmark
+- `POST /v1/seccomp/audit` - Statically audit OCI or Cloud Hypervisor seccomp profiles (JSON or SARIF format)
+- `GET /v1/seccomp/baseline` - Generate hardened baseline seccomp profiles for workload, vmm, or virtiofsd
 - `GET /v1/status` - Daemon health, backend capabilities (`snapshot_branching`, `cow_overlays`, `ksm_dedup`), instance counts, host resource gauges, and lifecycle summary
 - `GET /metrics` - Prometheus `0.0.4` text exposition (`omnivm_instances`, `omnivm_host_*`, `omnivm_ksm_*`, `omnivm_storage_cow_saved_bytes`, `omnivm_lifecycle_*`, `omnivm_router_*`)
 - `GET /v1/metrics` - Timestamped JSON telemetry (supports `?format=prometheus` and `Accept: application/openmetrics-text`)
@@ -249,6 +254,31 @@ Key REST endpoints:
 - `POST /v1/instances/{id}/expose` / `DELETE /v1/instances/{id}/expose/{guest_port}` - Dynamic L4/HTTP port publishing
 - `POST /v1/instances/{id}/tether` / `GET /v1/instances/{id}/tether/stream` - Host-guest agent frame bus
 - `PUT /v1/secrets/{name}` / `GET /v1/secrets` / `DELETE /v1/secrets/{name}` - Encrypted secret management
+
+
+## Multi-Tenant I/O QoS and Seccomp Security Auditing
+
+OmniVM v0.8.0 adds multi-tenant I/O quality-of-service isolation and Linux seccomp-bpf syscall profile auditing:
+
+- **Hierarchical Token-Bucket I/O Governor (`internal/ioqos`)**: Continuous-time two-tier token bucket governor enforcing per-tenant bandwidth and operations rate limits on `virtio-blk` and `virtio-net`. Computes weighted max-min fair shares across active tenant microVMs, synthesizes Cloud Hypervisor `RateLimiterConfig` payloads, and isolates latency-sensitive workloads from noisy neighbors during burst storms.
+- **Linux Seccomp-bpf Syscall Profile Auditor (`internal/seccomp`)**: Statically audits OCI container and Cloud Hypervisor thread-scoped seccomp profiles against 10 ring-0 and hypervisor escape rules (OVM-SEC-001 through OVM-SEC-010). Evaluates permissive default actions, kernel module loading, unrestricted BPF/userfaultfd, cross-process ptrace memory inspection, filesystem mount escapes, and unconstrained ioctl numbers with CVSS scoring and OASIS SARIF v2.1.0 output for GitHub Code Scanning.
+
+### CLI Commands
+
+```bash
+# Inspect and configure multi-tenant I/O QoS policies
+ovm qos status
+ovm qos mode fairshare
+ovm qos set-tenant tenant-prod --blk-mbps 150 --blk-iops 5000 --net-mbps 80 --net-pps 10000
+
+# Benchmark multi-tenant noisy-neighbor isolation under synthetic burst loads
+ovm bench ioqos --tenants 3 --noisy-vms 4 --duration-ms 2000
+
+# Statically audit a seccomp profile with SARIF output
+ovm seccomp audit profile.json --target vmm --sarif seccomp.sarif
+ovm seccomp rules
+ovm seccomp generate --target vmm --out hardened-vmm-seccomp.json
+```
 
 ## Testing
 

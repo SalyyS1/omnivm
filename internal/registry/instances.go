@@ -27,6 +27,8 @@ type Instance struct {
 	ParentID         string            `json:"parent_id,omitempty"`
 	SourceSnapshotID string            `json:"source_snapshot_id,omitempty"`
 	Capabilities     string            `json:"capabilities,omitempty"` // JSON-serialized CapabilityToken
+	TenantID         string            `json:"tenant_id,omitempty"`
+	IOQoS            string            `json:"io_qos,omitempty"` // JSON-serialized InstancePolicy
 	AutoWorkspace bool              `json:"auto_workspace,omitempty"`
 	StoppedAt     time.Time         `json:"stopped_at,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
@@ -61,8 +63,8 @@ func (d *DB) SaveInstance(inst *Instance) error {
 	}
 
 	_, err := d.db.Exec(`
-		INSERT INTO instances (id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO instances (id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, tenant_id, io_qos, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state = excluded.state,
 			command = excluded.command,
@@ -83,11 +85,14 @@ func (d *DB) SaveInstance(inst *Instance) error {
 			auto_workspace = excluded.auto_workspace,
 			disk_mb = excluded.disk_mb,
 			source_snapshot_id = excluded.source_snapshot_id,
+			tenant_id = excluded.tenant_id,
+			io_qos = excluded.io_qos,
 			updated_at = excluded.updated_at
 	`, inst.ID, inst.State, string(cmdJSON), string(portsJSON), inst.VMID,
 		inst.Handle, inst.ImageRef, inst.Workspace, string(envJSON), string(secretKeysJSON),
 		publicPortsStr, enabledInt, inst.MemoryMB, inst.VCPUs, stoppedAtStr,
 		inst.ParentID, inst.Capabilities, autoWsInt, inst.DiskMB, inst.SourceSnapshotID,
+		inst.TenantID, inst.IOQoS,
 		inst.CreatedAt.Format(time.RFC3339), time.Now().Format(time.RFC3339))
 	return err
 }
@@ -95,7 +100,7 @@ func (d *DB) SaveInstance(inst *Instance) error {
 // GetInstance retrieves an instance by ID.
 func (d *DB) GetInstance(id string) (*Instance, error) {
 	row := d.db.QueryRow(`
-		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, created_at, updated_at
+		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, tenant_id, io_qos, created_at, updated_at
 		FROM instances WHERE id = ?
 	`, id)
 	return scanInstance(row)
@@ -104,7 +109,7 @@ func (d *DB) GetInstance(id string) (*Instance, error) {
 // GetInstanceByHandle retrieves an instance by handle.
 func (d *DB) GetInstanceByHandle(handle string) (*Instance, error) {
 	row := d.db.QueryRow(`
-		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, created_at, updated_at
+		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, tenant_id, io_qos, created_at, updated_at
 		FROM instances WHERE handle = ?
 	`, handle)
 	return scanInstance(row)
@@ -113,7 +118,7 @@ func (d *DB) GetInstanceByHandle(handle string) (*Instance, error) {
 // ListInstances returns all instances.
 func (d *DB) ListInstances() ([]*Instance, error) {
 	rows, err := d.db.Query(`
-		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, created_at, updated_at
+		SELECT id, state, command, expose_ports, vm_id, handle, image_ref, workspace, env, secret_keys, public_ports, enabled, memory_mb, vcpus, stopped_at, parent_id, capabilities, auto_workspace, disk_mb, source_snapshot_id, tenant_id, io_qos, created_at, updated_at
 		FROM instances ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -219,7 +224,8 @@ func scanInstance(row *sql.Row) (*Instance, error) {
 	err := row.Scan(&inst.ID, &inst.State, &cmdJSON, &portsJSON, &inst.VMID,
 		&inst.Handle, &inst.ImageRef, &inst.Workspace, &envJSON, &secretKeysJSON,
 		&publicPortsJSON, &enabledInt, &inst.MemoryMB, &inst.VCPUs, &stoppedAtStr,
-		&inst.ParentID, &inst.Capabilities, &autoWsInt, &inst.DiskMB, &inst.SourceSnapshotID, &createdStr, &updatedStr)
+		&inst.ParentID, &inst.Capabilities, &autoWsInt, &inst.DiskMB, &inst.SourceSnapshotID,
+		&inst.TenantID, &inst.IOQoS, &createdStr, &updatedStr)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -248,7 +254,8 @@ func scanInstanceRow(rows *sql.Rows) (*Instance, error) {
 	err := rows.Scan(&inst.ID, &inst.State, &cmdJSON, &portsJSON, &inst.VMID,
 		&inst.Handle, &inst.ImageRef, &inst.Workspace, &envJSON, &secretKeysJSON,
 		&publicPortsJSON, &enabledInt, &inst.MemoryMB, &inst.VCPUs, &stoppedAtStr,
-		&inst.ParentID, &inst.Capabilities, &autoWsInt, &inst.DiskMB, &inst.SourceSnapshotID, &createdStr, &updatedStr)
+		&inst.ParentID, &inst.Capabilities, &autoWsInt, &inst.DiskMB, &inst.SourceSnapshotID,
+		&inst.TenantID, &inst.IOQoS, &createdStr, &updatedStr)
 	if err != nil {
 		return nil, err
 	}

@@ -147,6 +147,14 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "negative_disk_prewarm_budget",
 			mutate: func(c *Config) { c.DiskPrewarmBudgetMB = -10 },
 		},
+		{
+			name:   "invalid_io_qos_governor",
+			mutate: func(c *Config) { c.IOQoSGovernor = "unbounded" },
+		},
+		{
+			name:   "negative_tenant_blk_mbps",
+			mutate: func(c *Config) { c.TenantBlkMBps = -5 },
+		},
 	}
 
 	for _, tc := range tests {

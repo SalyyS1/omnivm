@@ -19,6 +19,7 @@ import (
 
 	"github.com/SalyyS1/omnivm/internal/blob"
 	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/lifecycle"
 	"github.com/SalyyS1/omnivm/internal/logstore"
 	"github.com/SalyyS1/omnivm/internal/registry"
@@ -108,11 +109,18 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /v1/secrets/{name}", s.handleGetSecret)
 	s.mux.HandleFunc("DELETE /v1/secrets/{name}", s.handleDeleteSecret)
 
-	// Status and telemetry
+	// Status, telemetry, multi-tenant I/O QoS, and seccomp security auditing
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
 	s.mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /metrics", s.handlePrometheusMetrics)
 	s.mux.HandleFunc("POST /v1/bench/prefault", s.handleBenchPrefault)
+	s.mux.HandleFunc("POST /v1/bench/ioqos", s.handleBenchIOQoS)
+	s.mux.HandleFunc("GET /v1/qos", s.handleGetQoS)
+	s.mux.HandleFunc("PUT /v1/qos/mode", s.handleSetQoSMode)
+	s.mux.HandleFunc("PUT /v1/qos/tenants/{tenant}", s.handleSetTenantQoS)
+	s.mux.HandleFunc("DELETE /v1/qos/tenants/{tenant}", s.handleDeleteTenantQoS)
+	s.mux.HandleFunc("POST /v1/seccomp/audit", s.handleSeccompAudit)
+	s.mux.HandleFunc("GET /v1/seccomp/baseline", s.handleSeccompBaseline)
 }
 
 // Start begins listening on the unix socket.
@@ -215,6 +223,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"vsock_mux":             true,
 			"cgroup_v2_watermark":   resMetrics.CgroupAvailable,
 			"warm_pool_prefault":    true,
+			"io_qos_governor":       true,
+			"seccomp_auditor":       true,
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,
@@ -283,6 +293,8 @@ type createInstanceRequest struct {
 	DiskMB       int                        `json:"disk_mb,omitempty"`
 	VCPUs        int                        `json:"vcpus,omitempty"`
 	IdlePolicy   string                     `json:"idle_policy,omitempty"`
+	TenantID     string                     `json:"tenant_id,omitempty"`
+	IOQoS        *ioqos.InstancePolicy      `json:"io_qos,omitempty"`
 	Capabilities *lifecycle.CapabilityToken `json:"capabilities,omitempty"` // guest orchestration capabilities
 }
 
@@ -374,6 +386,16 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	if req.Capabilities != nil {
 		opts = append(opts, lifecycle.WithCapabilities(req.Capabilities))
 	}
+	if req.TenantID != "" {
+		opts = append(opts, lifecycle.WithTenantID(req.TenantID))
+	}
+	if req.IOQoS != nil {
+		if err := req.IOQoS.Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		opts = append(opts, lifecycle.WithIOQoS(req.IOQoS))
+	}
 
 	// Create in lifecycle manager.
 	// This triggers onInstanceCreated which handles router port allocation
@@ -399,6 +421,12 @@ func (s *Server) handleCreateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ImageRef != "" {
 		resp["image_ref"] = req.ImageRef
+	}
+	if req.TenantID != "" {
+		resp["tenant_id"] = ioqos.NormalizeTenantID(req.TenantID)
+	}
+	if req.IOQoS != nil && !req.IOQoS.IsZero() {
+		resp["io_qos"] = req.IOQoS
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -498,6 +526,12 @@ func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 
 	if snap.IdlePolicy != "" {
 		resp["idle_policy"] = snap.IdlePolicy
+	}
+	if snap.TenantID != "" {
+		resp["tenant_id"] = snap.TenantID
+	}
+	if snap.IOQoS != nil && !snap.IOQoS.IsZero() {
+		resp["io_qos"] = snap.IOQoS
 	}
 	if held, reason, expiresAt := s.lifecycle.LeaseInfo(snap.ID); held {
 		resp["lease_held"] = true
@@ -600,6 +634,12 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 		}
 		if snap.SourceSnapshotID != "" {
 			entry["source_snapshot_id"] = snap.SourceSnapshotID
+		}
+		if snap.TenantID != "" {
+			entry["tenant_id"] = snap.TenantID
+		}
+		if snap.IOQoS != nil && !snap.IOQoS.IsZero() {
+			entry["io_qos"] = snap.IOQoS
 		}
 		if !snap.StoppedAt.IsZero() {
 			entry["stopped_at"] = snap.StoppedAt.Format(time.RFC3339)

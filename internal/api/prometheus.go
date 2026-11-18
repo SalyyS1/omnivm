@@ -175,6 +175,44 @@ func (s *Server) handlePrometheusMetrics(w http.ResponseWriter, r *http.Request)
 	}
 	telemetry.WritePrometheusHistogram(&b, "omnivm_wake_latency_seconds", "MicroVM wake and transition latency in seconds partitioned by transition path.", "path", wakeSeries)
 
+	writeGauge("omnivm_ioqos_active_tenants", "Number of tenants tracked by the I/O QoS token-bucket governor.", int64(lmMetrics.IOQoS.ActiveTenants))
+	writeGauge("omnivm_ioqos_active_instances", "Number of active microVMs registered in the I/O QoS governor.", int64(lmMetrics.IOQoS.ActiveInstances))
+	fairnessVal := lmMetrics.IOQoS.FairnessIndex
+	if fairnessVal == 0 && lmMetrics.IOQoS.ActiveInstances <= 1 {
+		fairnessVal = 1.0
+	}
+	fmt.Fprintf(&b, "# HELP omnivm_ioqos_fairness_index Weighted Jain fairness index across active tenant microVM I/O allocations.\n")
+	fmt.Fprintf(&b, "# TYPE omnivm_ioqos_fairness_index gauge\n")
+	fmt.Fprintf(&b, "omnivm_ioqos_fairness_index %.4f\n", fairnessVal)
+
+	ioBytesType := "omnivm_ioqos_admitted_bytes_total"
+	ioOpsType := "omnivm_ioqos_admitted_ops_total"
+	ioThrottlesType := "omnivm_ioqos_throttles_total"
+	if openMetrics {
+		ioBytesType = "omnivm_ioqos_admitted_bytes"
+		ioOpsType = "omnivm_ioqos_admitted_ops"
+		ioThrottlesType = "omnivm_ioqos_throttles"
+	}
+	fmt.Fprintf(&b, "# HELP %s Cumulative guest I/O bytes admitted through token-bucket QoS channels.\n", ioBytesType)
+	fmt.Fprintf(&b, "# TYPE %s counter\n", ioBytesType)
+	fmt.Fprintf(&b, "omnivm_ioqos_admitted_bytes_total{channel=\"blk\"} %d\n", lmMetrics.IOQoS.BlkAdmittedBytes)
+	fmt.Fprintf(&b, "omnivm_ioqos_admitted_bytes_total{channel=\"net\"} %d\n", lmMetrics.IOQoS.NetAdmittedBytes)
+
+	fmt.Fprintf(&b, "# HELP %s Cumulative guest I/O operations or packets admitted through token-bucket QoS channels.\n", ioOpsType)
+	fmt.Fprintf(&b, "# TYPE %s counter\n", ioOpsType)
+	fmt.Fprintf(&b, "omnivm_ioqos_admitted_ops_total{channel=\"blk\"} %d\n", lmMetrics.IOQoS.BlkAdmittedOps)
+	fmt.Fprintf(&b, "omnivm_ioqos_admitted_ops_total{channel=\"net\"} %d\n", lmMetrics.IOQoS.NetAdmittedOps)
+
+	fmt.Fprintf(&b, "# HELP %s Cumulative token-bucket burst throttle events partitioned by scope and channel.\n", ioThrottlesType)
+	fmt.Fprintf(&b, "# TYPE %s counter\n", ioThrottlesType)
+	fmt.Fprintf(&b, "omnivm_ioqos_throttles_total{scope=\"instance\",channel=\"blk\"} %d\n", lmMetrics.IOQoS.InstanceBlkThrottles)
+	fmt.Fprintf(&b, "omnivm_ioqos_throttles_total{scope=\"instance\",channel=\"net\"} %d\n", lmMetrics.IOQoS.InstanceNetThrottles)
+	fmt.Fprintf(&b, "omnivm_ioqos_throttles_total{scope=\"tenant\",channel=\"blk\"} %d\n", lmMetrics.IOQoS.TenantBlkThrottles)
+	fmt.Fprintf(&b, "omnivm_ioqos_throttles_total{scope=\"tenant\",channel=\"net\"} %d\n", lmMetrics.IOQoS.TenantNetThrottles)
+
+	writeCounter("omnivm_ioqos_throttle_wait_microseconds", "Cumulative retry-after pacing delay computed by the I/O QoS governor in microseconds.", lmMetrics.IOQoS.ThrottleWaitMicros)
+	writeCounter("omnivm_ioqos_rebalance_passes", "Total weighted max-min fair-share rebalance passes across tenant microVMs.", lmMetrics.IOQoS.RebalancePasses)
+
 	writeGauge("omnivm_router_active_port_proxies", "Number of bound host L4/HTTP port proxy listeners.", int64(rtrMetrics.ActivePortProxies))
 	writeCounter("omnivm_router_http_requests", "Total HTTP ingress requests handled by the main router.", rtrMetrics.HTTPRequests)
 	writeCounter("omnivm_router_tcp_connections", "Total TCP connections accepted on exposed instance ports.", rtrMetrics.TCPConnections)

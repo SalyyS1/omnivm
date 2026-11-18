@@ -126,6 +126,22 @@ type Config struct {
 	// CgroupMemoryHighRatio sets the baseline memory.high / ceiling ratio
 	// (between 0.50 and 0.98, or 0 for default 0.85). Set via OVM_CGROUP_MEMORY_HIGH_RATIO.
 	CgroupMemoryHighRatio float64
+
+	// IOQoSGovernor controls per-tenant virtio-blk and virtio-net token-bucket
+	// shaping: "off" (default), "static", or "fairshare". Set via OVM_IO_QOS_GOVERNOR.
+	IOQoSGovernor string
+
+	// TenantBlkMBps caps default per-tenant aggregate virtio-blk bandwidth in MiB/s (0 = unlimited).
+	TenantBlkMBps int
+
+	// TenantBlkIOPS caps default per-tenant aggregate virtio-blk IOPS (0 = unlimited).
+	TenantBlkIOPS int
+
+	// TenantNetMBps caps default per-tenant aggregate virtio-net bandwidth in MiB/s (0 = unlimited).
+	TenantNetMBps int
+
+	// TenantNetPPS caps default per-tenant aggregate virtio-net packet rate in PPS (0 = unlimited).
+	TenantNetPPS int
 }
 
 // DefaultConfig returns the default configuration.
@@ -154,6 +170,10 @@ func DefaultConfig() *Config {
 	diskPrewarm := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_DISK_PREWARM")))
 	if diskPrewarm == "" {
 		diskPrewarm = "auto"
+	}
+	ioQosMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_IO_QOS_GOVERNOR")))
+	if ioQosMode == "" {
+		ioQosMode = "off"
 	}
 
 	return &Config{
@@ -186,6 +206,11 @@ func DefaultConfig() *Config {
 		DiskPrewarmBudgetMB:   parseOptionalEnvInt("OVM_DISK_PREWARM_BUDGET_MB"),
 		CgroupGovernor:        cgroupMode,
 		CgroupMemoryHighRatio: parseOptionalEnvFloat("OVM_CGROUP_MEMORY_HIGH_RATIO"),
+		IOQoSGovernor:         ioQosMode,
+		TenantBlkMBps:         parseOptionalEnvInt("OVM_TENANT_BLK_MBPS"),
+		TenantBlkIOPS:         parseOptionalEnvInt("OVM_TENANT_BLK_IOPS"),
+		TenantNetMBps:         parseOptionalEnvInt("OVM_TENANT_NET_MBPS"),
+		TenantNetPPS:          parseOptionalEnvInt("OVM_TENANT_NET_PPS"),
 	}
 }
 
@@ -307,6 +332,14 @@ func (c *Config) Validate() error {
 	}
 	if c.CgroupMemoryHighRatio != 0 && (c.CgroupMemoryHighRatio < 0.50 || c.CgroupMemoryHighRatio > 0.98) {
 		return fmt.Errorf("cgroup_memory_high_ratio must be 0 or between 0.50 and 0.98, got %v", c.CgroupMemoryHighRatio)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.IOQoSGovernor)) {
+	case "", "off", "static", "fairshare":
+	default:
+		return fmt.Errorf("unsupported io_qos_governor %q: expected off, static, or fairshare", c.IOQoSGovernor)
+	}
+	if c.TenantBlkMBps < 0 || c.TenantBlkIOPS < 0 || c.TenantNetMBps < 0 || c.TenantNetPPS < 0 {
+		return errors.New("tenant QoS limits (blk_mbps, blk_iops, net_mbps, net_pps) must be non-negative")
 	}
 	if c.DNSServer != "" {
 		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {

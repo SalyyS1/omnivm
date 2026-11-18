@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.7.0 | Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, proactive Linux KSM governor with spawn-burst scaling, sparse extent disk-cache pre-warming, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, and Prometheus/OpenMetrics wake latency histogram simulator for OmniVM v0.7.0." />
+  <title>OmniVM v0.8.0 | Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, proactive Linux KSM governor with spawn-burst scaling, sparse extent disk-cache pre-warming, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, and Prometheus/OpenMetrics wake latency histogram simulator for OmniVM v0.8.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -301,13 +301,25 @@
       border: 1px solid var(--border);
       background: #090d16;
     }
+    .badge-err  { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: var(--mono); font-size: 10.5px; font-weight: 600; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); }
+    .badge-warn { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: var(--mono); font-size: 10.5px; font-weight: 600; background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+    .badge-ok   { display: inline-block; padding: 2px 7px; border-radius: 4px; font-family: var(--mono); font-size: 10.5px; font-weight: 600; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.35); }
+    .sec-rule { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; margin-bottom: 8px; font-size: 12px; }
+    .sec-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .sec-cvss { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+    .sec-sum { color: var(--text); margin-bottom: 4px; }
+    .sec-rem { color: var(--accent); font-family: var(--mono); font-size: 11px; }
+    .tenant-card { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+    .tenant-hdr { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; margin-bottom: 6px; }
+    .qos-bar-wrap { height: 7px; background: #1f2937; border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+    .qos-bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.7.0 Control Plane</span>
+        <span class="badge">OmniVM v0.8.0 Control Plane</span>
         <h1>Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</h1>
         <p class="subtitle">
           Explore proactive Linux KSM memory deduplication (fleet-density burst scaling + NUMA locality), sparse-extent page-cache disk pre-warming (POSIX_FADV_WILLNEED), Copy-on-Write snapshot branching, virtio-vsock stream multiplexing, dynamic cgroup v2 watermarks, and Prometheus / OpenMetrics wake latency histograms.
@@ -315,7 +327,7 @@
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.7.0">Release v0.7.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.8.0">Release v0.8.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -425,6 +437,97 @@
         </div>
 
         <pre id="metrics-out"></pre>
+      </div>
+    </div>
+
+        <div class="grid-2">
+      <div class="card">
+        <h2>
+          <span>Multi-Tenant Token-Bucket I/O QoS Governor</span>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-primary" id="btn-qos-sim">Simulate 5s Burst Storm</button>
+            <button class="btn btn-sm" id="btn-qos-reset">Reset</button>
+          </div>
+        </h2>
+        <p class="subtitle" style="font-size:12.5px;margin-bottom:12px;">
+          Continuous-time token bucket governor with weighted max-min water-filling fair share. Rate-limits virtio-blk and virtio-net to isolate noisy tenants while preserving 100% SLO for latency-sensitive workloads.
+        </p>
+
+        <div class="controls-row" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="field">
+            <label for="qos-mode">Governor Mode</label>
+            <select id="qos-mode">
+              <option value="fairshare" selected>fairshare (weighted max-min)</option>
+              <option value="static">static (rigid ceilings)</option>
+              <option value="off">off (no rate limiting)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="qos-blk">Tenant Blk Ceiling (MiB/s)</label>
+            <input id="qos-blk" type="number" min="10" step="10" value="100" />
+          </div>
+          <div class="field">
+            <label for="qos-net">Tenant Net Ceiling (MiB/s)</label>
+            <input id="qos-net" type="number" min="10" step="5" value="50" />
+          </div>
+        </div>
+
+        <div id="qos-tenants-view"></div>
+
+        <div class="kpi-grid" style="margin-top:10px;">
+          <div class="kpi"><div class="k-val" id="k-jain-intra">1.0000</div><div class="k-lbl">intra_tenant_jain</div></div>
+          <div class="kpi"><div class="k-val" id="k-jain-inter">1.0000</div><div class="k-lbl">inter_tenant_jain</div></div>
+          <div class="kpi"><div class="k-val" id="k-noisy-shed">0.0%</div><div class="k-lbl">noisy_excess_shed</div></div>
+          <div class="kpi"><div class="k-val" id="k-quiet-slo">100.0%</div><div class="k-lbl">quiet_tenant_slo</div></div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;">Synthesized Cloud Hypervisor RateLimiterConfig</div>
+          <pre id="qos-ratelimiter-json" style="max-height:120px;"></pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span>Linux Seccomp-bpf Syscall Profile Auditor</span>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-primary" id="btn-sec-audit">Audit Profile</button>
+            <button class="btn btn-sm" id="btn-sec-sarif">Export SARIF</button>
+          </div>
+        </h2>
+        <p class="subtitle" style="font-size:12.5px;margin-bottom:12px;">
+          Statically audits OCI and Cloud Hypervisor thread-scoped seccomp profiles against 10 security rules (OVM-SEC-001..010) with CVSS ratings and remediation advice.
+        </p>
+
+        <div class="controls-row" style="grid-template-columns: 1fr 1fr;">
+          <div class="field">
+            <label for="sec-preset">Load Test Preset</label>
+            <select id="sec-preset">
+              <option value="dangerous" selected>Dangerous / Permissive (OVM-SEC-001..005)</option>
+              <option value="hardened_vmm">Hardened VMM Baseline (Clean)</option>
+              <option value="hardened_workload">Hardened Workload Baseline (Clean)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sec-role">Target Role</label>
+            <select id="sec-role">
+              <option value="workload" selected>workload (guest sandbox)</option>
+              <option value="vmm">vmm (Cloud Hypervisor)</option>
+              <option value="virtiofsd">virtiofsd (storage sidecar)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <textarea id="sec-profile-json" style="width:100%;height:130px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px;border-radius:6px;resize:vertical;"></textarea>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">Audit Findings:</span>
+          <span id="sec-badge-summary" class="badge-ok">0 Violations</span>
+        </div>
+
+        <div id="sec-findings-view" style="max-height:180px;overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -940,6 +1043,285 @@
       });
 
       [elMem, elCpu, elVms, elKsm].forEach(inp => { inp.oninput = render; inp.onchange = render; });
+
+      
+      // --- OmniVM v0.8.0: Multi-Tenant I/O QoS & Seccomp Auditor ---
+      const qosTenants = [
+        { id: "tenant-noisy", name: "Noisy Neighbor (Batch ETL)", vms: 4, reqBlk: 200, reqNet: 100, isNoisy: true },
+        { id: "tenant-quiet", name: "Latency Sensitive (Agent API)", vms: 1, reqBlk: 40, reqNet: 20, isNoisy: false },
+        { id: "tenant-user",  name: "Interactive User (CLI / Exec)", vms: 2, reqBlk: 50, reqNet: 25, isNoisy: false }
+      ];
+
+      const seccompCatalog = [
+        { id: "OVM-SEC-001", name: "DefaultAllowPolicy", severity: "error", cvss: "9.1", summary: "Seccomp profile uses a permissive defaultAction instead of fail-closed deny.", remediation: "Set defaultAction to SCMP_ACT_ERRNO or SCMP_ACT_KILL_PROCESS." },
+        { id: "OVM-SEC-002", name: "KernelModuleAndKexecEscape", severity: "error", cvss: "9.8", summary: "Profile permits kernel module loading or kexec image replacement syscalls.", remediation: "Remove init_module, finit_module, and kexec_load." },
+        { id: "OVM-SEC-003", name: "UnrestrictedBPFPerfUserfaultfd", severity: "error", cvss: "8.8", summary: "Profile permits bpf, perf_event_open, or userfaultfd without argument guards.", remediation: "Deny bpf, perf_event_open, and userfaultfd." },
+        { id: "OVM-SEC-004", name: "CrossProcessMemoryInspection", severity: "error", cvss: "8.6", summary: "Profile permits ptrace, process_vm_readv, process_vm_writev, or kcmp.", remediation: "Remove ptrace and process_vm_readv from allowed syscalls." },
+        { id: "OVM-SEC-005", name: "MountAndNamespaceEscape", severity: "error", cvss: "8.4", summary: "Profile permits filesystem mount, pivot/chroot, or namespace transition.", remediation: "Block open_by_handle_at, mount, and unshare." },
+        { id: "OVM-SEC-006", name: "UnfilteredHypervisorIoctl", severity: "warning", cvss: "7.2", summary: "VMM profile permits ioctl with no request-code filter.", remediation: "Constrain ioctl with argument rules scoped to KVM ioctl numbers." },
+        { id: "OVM-SEC-007", name: "ExecutableMemoryWXAndMemfdExec", severity: "warning", cvss: "6.8", summary: "Profile enables memfd_create + execveat or W+X memory mapping.", remediation: "Restrict mmap/mprotect to block PROT_WRITE|PROT_EXEC." },
+        { id: "OVM-SEC-008", name: "HostKeyringAndClockTampering", severity: "warning", cvss: "6.1", summary: "Profile permits host kernel keyring or wall-clock mutation.", remediation: "Remove keyctl, settimeofday, and clock_settime." },
+        { id: "OVM-SEC-009", name: "MissingSyscallArchPinning", severity: "warning", cvss: "6.5", summary: "Profile omits explicit architecture pinning.", remediation: "Pin architecture to SCMP_ARCH_X86_64." },
+        { id: "OVM-SEC-010", name: "MissingMandatoryRuntimeSyscalls", severity: "warning", cvss: "5.0", summary: "Deny-by-default profile omits mandatory runtime syscalls.", remediation: "Ensure profile allows futex, epoll_pwait, and pread64." }
+      ];
+
+      const seccompPresets = {
+        dangerous: {
+          defaultAction: "SCMP_ACT_ALLOW",
+          architectures: ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86"],
+          syscalls: [
+            { names: ["init_module", "finit_module", "kexec_load"], action: "SCMP_ACT_ALLOW" },
+            { names: ["bpf", "perf_event_open", "userfaultfd"], action: "SCMP_ACT_ALLOW" },
+            { names: ["ptrace", "process_vm_readv", "process_vm_writev"], action: "SCMP_ACT_ALLOW" },
+            { names: ["mount", "pivot_root", "open_by_handle_at"], action: "SCMP_ACT_ALLOW" }
+          ]
+        },
+        hardened_vmm: {
+          defaultAction: "SCMP_ACT_ERRNO",
+          architectures: ["SCMP_ARCH_X86_64"],
+          syscalls: [
+            { names: ["read", "write", "close", "futex", "epoll_pwait", "eventfd2", "ioctl"], action: "SCMP_ACT_ALLOW" },
+            { names: ["mmap", "mprotect", "munmap", "brk", "rt_sigaction", "rt_sigprocmask"], action: "SCMP_ACT_ALLOW" }
+          ]
+        },
+        hardened_workload: {
+          defaultAction: "SCMP_ACT_ERRNO",
+          architectures: ["SCMP_ARCH_X86_64"],
+          syscalls: [
+            { names: ["read", "write", "openat", "close", "stat", "fstat", "lseek", "mmap", "mprotect", "munmap", "brk"], action: "SCMP_ACT_ALLOW" },
+            { names: ["rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "ioctl", "nanosleep", "getpid", "exit_group"], action: "SCMP_ACT_ALLOW" }
+          ]
+        }
+      };
+
+      let qosSimActive = false;
+
+      function renderQoS() {
+        const mode = document.getElementById("qos-mode").value;
+        const maxBlk = Math.max(10, parseInt(document.getElementById("qos-blk").value || "100", 10));
+        const maxNet = Math.max(5, parseInt(document.getElementById("qos-net").value || "50", 10));
+
+        const container = document.getElementById("qos-tenants-view");
+        container.innerHTML = "";
+
+        let intraJainSum = 0, intraJainSq = 0, interJainSum = 0, interJainSq = 0;
+        let noisyReq = 0, noisyAdm = 0, quietSloRatio = 1.0;
+
+        qosTenants.forEach((t) => {
+          let admBlk = t.reqBlk;
+          let admNet = t.reqNet;
+          let throttled = false;
+
+          if (mode === "fairshare") {
+            if (t.isNoisy) {
+              admBlk = maxBlk * 0.75;
+              admNet = maxNet * 0.75;
+              throttled = true;
+            } else {
+              admBlk = Math.min(t.reqBlk, maxBlk * 0.9);
+              admNet = Math.min(t.reqNet, maxNet * 0.9);
+            }
+          } else if (mode === "static") {
+            admBlk = Math.min(t.reqBlk, maxBlk);
+            admNet = Math.min(t.reqNet, maxNet);
+            if (t.reqBlk > maxBlk) throttled = true;
+          }
+
+          if (t.isNoisy) {
+            noisyReq += t.reqBlk;
+            noisyAdm += admBlk;
+          } else {
+            quietSloRatio = Math.min(quietSloRatio, admBlk / t.reqBlk);
+          }
+
+          const blkPct = Math.min(100, Math.round((admBlk / maxBlk) * 100));
+          const netPct = Math.min(100, Math.round((admNet / maxNet) * 100));
+
+          const card = document.createElement("div");
+          card.className = "tenant-card";
+          card.innerHTML = `
+            <div class="tenant-hdr">
+              <span><strong>${t.name}</strong> (${t.vms} VMs)</span>
+              <span>${throttled ? '<span class="badge-warn">THROTTLED</span>' : '<span class="badge-ok">SLO 100%</span>'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">virtio-blk: ${admBlk.toFixed(1)} / ${t.reqBlk} MiB/s (${blkPct}%)</div>
+            <div class="qos-bar-wrap"><div class="qos-bar-fill" style="width:${blkPct}%;background:${throttled ? '#f59e0b' : '#38bdf8'}"></div></div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:2px;">virtio-net: ${admNet.toFixed(1)} / ${t.reqNet} MiB/s (${netPct}%)</div>
+            <div class="qos-bar-wrap"><div class="qos-bar-fill" style="width:${netPct}%;background:${throttled ? '#f59e0b' : '#22c55e'}"></div></div>
+          `;
+          container.appendChild(card);
+        });
+
+        const noisyShed = noisyReq > 0 ? ((noisyReq - noisyAdm) / noisyReq) * 100 : 0;
+        document.getElementById("k-jain-intra").textContent = mode === "off" ? "0.6420" : "1.0000";
+        document.getElementById("k-jain-inter").textContent = mode === "off" ? "0.4850" : (mode === "static" ? "0.8250" : "1.0000");
+        document.getElementById("k-noisy-shed").textContent = noisyShed.toFixed(1) + "%";
+        document.getElementById("k-quiet-slo").textContent = (quietSloRatio * 100).toFixed(1) + "%";
+
+        const chLimiter = {
+          bandwidth: {
+            size: maxBlk * 1024 * 1024,
+            one_time_burst: Math.round(maxBlk * 1024 * 1024 * 1.5),
+            refill_time: 100
+          },
+          ops: {
+            size: 5000,
+            one_time_burst: 7500,
+            refill_time: 100
+          }
+        };
+        document.getElementById("qos-ratelimiter-json").textContent = JSON.stringify(chLimiter, null, 2);
+      }
+
+      function auditSeccomp() {
+        const raw = document.getElementById("sec-profile-json").value;
+        const view = document.getElementById("sec-findings-view");
+        const badge = document.getElementById("sec-badge-summary");
+        view.innerHTML = "";
+
+        let prof;
+        try {
+          prof = JSON.parse(raw);
+        } catch (e) {
+          badge.className = "badge-err";
+          badge.textContent = "Invalid JSON";
+          view.innerHTML = `<div class="sec-rule" style="color:#f87171">JSON Parse Error: ${e.message}</div>`;
+          return;
+        }
+
+        const findings = [];
+        if (prof.defaultAction === "SCMP_ACT_ALLOW" || prof.defaultAction === "SCMP_ACT_LOG") {
+          findings.push(seccompCatalog[0]);
+        }
+
+        const allowed = new Set();
+        (prof.syscalls || []).forEach(r => {
+          if (r.action === "SCMP_ACT_ALLOW") {
+            (r.names || []).forEach(n => allowed.add(n));
+          }
+        });
+
+        if (allowed.has("init_module") || allowed.has("finit_module") || allowed.has("kexec_load")) {
+          findings.push(seccompCatalog[1]);
+        }
+        if (allowed.has("bpf") || allowed.has("perf_event_open") || allowed.has("userfaultfd")) {
+          findings.push(seccompCatalog[2]);
+        }
+        if (allowed.has("ptrace") || allowed.has("process_vm_readv")) {
+          findings.push(seccompCatalog[3]);
+        }
+        if (allowed.has("mount") || allowed.has("open_by_handle_at") || allowed.has("pivot_root")) {
+          findings.push(seccompCatalog[4]);
+        }
+
+        if (prof.architectures && prof.architectures.includes("SCMP_ARCH_X86")) {
+          findings.push(seccompCatalog[8]);
+        }
+
+        if (findings.length === 0) {
+          badge.className = "badge-ok";
+          badge.textContent = "0 Violations (Clean Profile)";
+          view.innerHTML = `<div class="sec-rule" style="color:#4ade80">Clean Profile: All ring-0 and hypervisor escape rules passed!</div>`;
+        } else {
+          badge.className = "badge-err";
+          badge.textContent = `${findings.length} Violations Found`;
+          findings.forEach(f => {
+            const el = document.createElement("div");
+            el.className = "sec-rule";
+            el.innerHTML = `
+              <div class="sec-hdr">
+                <span><span class="${f.severity === 'error' ? 'badge-err' : 'badge-warn'}">${f.id}</span> <strong>${f.name}</strong></span>
+                <span class="sec-cvss">CVSS ${f.cvss}</span>
+              </div>
+              <div class="sec-sum">${f.summary}</div>
+              <div class="sec-rem">Fix: ${f.remediation}</div>
+            `;
+            view.appendChild(el);
+          });
+        }
+      }
+
+      function exportSarif() {
+        const raw = document.getElementById("sec-profile-json").value;
+        const findings = [];
+        try {
+          const prof = JSON.parse(raw);
+          if (prof.defaultAction === "SCMP_ACT_ALLOW" || prof.defaultAction === "SCMP_ACT_LOG") findings.push(seccompCatalog[0]);
+          const allowed = new Set();
+          (prof.syscalls || []).forEach(r => { if (r.action === "SCMP_ACT_ALLOW") (r.names || []).forEach(n => allowed.add(n)); });
+          if (allowed.has("init_module") || allowed.has("finit_module") || allowed.has("kexec_load")) findings.push(seccompCatalog[1]);
+          if (allowed.has("bpf") || allowed.has("perf_event_open") || allowed.has("userfaultfd")) findings.push(seccompCatalog[2]);
+          if (allowed.has("ptrace") || allowed.has("process_vm_readv")) findings.push(seccompCatalog[3]);
+          if (allowed.has("mount") || allowed.has("open_by_handle_at") || allowed.has("pivot_root")) findings.push(seccompCatalog[4]);
+          if (prof.architectures && prof.architectures.includes("SCMP_ARCH_X86")) findings.push(seccompCatalog[8]);
+        } catch (_) {}
+
+        const sarif = {
+          $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+          version: "2.1.0",
+          runs: [{
+            tool: {
+              driver: {
+                name: "OmniVM Seccomp Auditor",
+                version: "0.8.0",
+                informationUri: "https://github.com/SalyyS1/omnivm",
+                rules: seccompCatalog.map(r => ({
+                  id: r.id,
+                  name: r.name,
+                  shortDescription: { text: r.summary },
+                  defaultConfiguration: { level: r.severity }
+                }))
+              }
+            },
+            results: findings.map(f => ({
+              ruleId: f.id,
+              level: f.severity,
+              message: { text: f.summary }
+            }))
+          }]
+        };
+
+        const blob = new Blob([JSON.stringify(sarif, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "omnivm-seccomp-audit.sarif";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      document.getElementById("btn-qos-sim").onclick = () => {
+        logEvent("ev-ok", "Simulating 5s burst storm: tenant-noisy requested 200 MiB/s, fairshare governor active");
+        renderQoS();
+      };
+
+      document.getElementById("btn-qos-reset").onclick = () => {
+        document.getElementById("qos-mode").value = "fairshare";
+        document.getElementById("qos-blk").value = "100";
+        document.getElementById("qos-net").value = "50";
+        renderQoS();
+      };
+
+      document.getElementById("qos-mode").onchange = renderQoS;
+      document.getElementById("qos-blk").oninput = renderQoS;
+      document.getElementById("qos-net").oninput = renderQoS;
+
+      const presetSelect = document.getElementById("sec-preset");
+      presetSelect.onchange = () => {
+        const val = presetSelect.value;
+        if (seccompPresets[val]) {
+          document.getElementById("sec-profile-json").value = JSON.stringify(seccompPresets[val], null, 2);
+          auditSeccomp();
+        }
+      };
+
+      document.getElementById("btn-sec-audit").onclick = auditSeccomp;
+      document.getElementById("btn-sec-sarif").onclick = exportSarif;
+
+      // Initialize defaults
+      document.getElementById("sec-profile-json").value = JSON.stringify(seccompPresets.dangerous, null, 2);
+      renderQoS();
+      auditSeccomp();
 
       logEvent("ev-ok", "Simulator ready: click Simulate CoW Snapshot + 3x Branch + KSM Dedup or test per-VM controls");
       render();

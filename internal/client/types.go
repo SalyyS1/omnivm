@@ -196,6 +196,24 @@ type WakeLatencyMetrics struct {
 	CoalescedWait WakeLatencySummary `json:"coalesced_wait"`
 }
 
+// IOQoSMetrics reports multi-tenant token-bucket I/O QoS governor counters.
+type IOQoSMetrics struct {
+	Mode                 string  `json:"mode"`
+	ActiveTenants        int     `json:"active_tenants"`
+	ActiveInstances      int     `json:"active_instances"`
+	FairnessIndex        float64 `json:"fairness_index"`
+	BlkAdmittedBytes     uint64  `json:"blk_admitted_bytes"`
+	BlkAdmittedOps       uint64  `json:"blk_admitted_ops"`
+	NetAdmittedBytes     uint64  `json:"net_admitted_bytes"`
+	NetAdmittedOps       uint64  `json:"net_admitted_ops"`
+	InstanceBlkThrottles uint64  `json:"instance_blk_throttles"`
+	InstanceNetThrottles uint64  `json:"instance_net_throttles"`
+	TenantBlkThrottles   uint64  `json:"tenant_blk_throttles"`
+	TenantNetThrottles   uint64  `json:"tenant_net_throttles"`
+	ThrottleWaitMicros   uint64  `json:"throttle_wait_micros"`
+	RebalancePasses      uint64  `json:"rebalance_passes"`
+}
+
 // LifecycleMetrics holds scale-to-zero lifecycle counters.
 type LifecycleMetrics struct {
 	ColdStarts        uint64             `json:"cold_starts"`
@@ -213,6 +231,7 @@ type LifecycleMetrics struct {
 	CoWSavedBytes     uint64             `json:"cow_saved_bytes"`
 	ActiveConnections int                `json:"active_connections"`
 	DiskPrewarm       DiskPrewarmMetrics `json:"disk_prewarm"`
+	IOQoS             IOQoSMetrics       `json:"io_qos"`
 	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 

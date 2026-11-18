@@ -22,7 +22,7 @@ import (
 )
 
 // CloudHypervisorVMM implements the VMM interface using Cloud Hypervisor on Linux.
-// Communication with CH is via its unix socket REST API — no cgo, no external SDK.
+// Communication with CH is via its unix socket REST API - no cgo, no external SDK.
 type CloudHypervisorVMM struct {
 	mu        sync.Mutex
 	instances map[string]*chInstance
@@ -174,11 +174,11 @@ func (v *CloudHypervisorVMM) CreateVM(cfg VMConfig) (Handle, error) {
 		hostIP:          hostIP,
 	}
 
-	// Build endpoints — for tap networking, router dials guestIP:guestPort directly
+	// Build endpoints - for tap networking, router dials guestIP:guestPort directly
 	for _, ep := range cfg.ExposePorts {
 		inst.endpoints = append(inst.endpoints, HostEndpoint{
 			GuestPort:   ep.GuestPort,
-			HostPort:    ep.GuestPort, // same port — no random allocation needed
+			HostPort:    ep.GuestPort, // same port - no random allocation needed
 			Protocol:    ep.Protocol,
 			BackendAddr: guestIP,
 		})
@@ -310,10 +310,10 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 		// The root disk is always a raw ext4 image. Cloud Hypervisor requires
 		// an explicit image type instead of probing the file format.
 		"disks": []map[string]interface{}{
-			{"path": cfg.Rootfs.Path, "image_type": "Raw"},
+			buildCHDiskPayload(cfg.Rootfs.Path, cfg.DiskRateLimiter),
 		},
 		"net": []map[string]interface{}{
-			{"tap": inst.tapName},
+			buildCHNetPayload(inst.tapName, cfg.NetRateLimiter),
 		},
 		"vsock": map[string]interface{}{
 			"cid":    3,
@@ -429,6 +429,27 @@ func buildCHMemoryPayload(memBytes int64, workspacePath string, mergeable bool) 
 		"size":   memBytes,
 		"shared": true,
 	}
+}
+
+func buildCHDiskPayload(path string, rateLimiter map[string]interface{}) map[string]interface{} {
+	disk := map[string]interface{}{
+		"path":       path,
+		"image_type": "Raw",
+	}
+	if len(rateLimiter) > 0 {
+		disk["rate_limiter_config"] = rateLimiter
+	}
+	return disk
+}
+
+func buildCHNetPayload(tapName string, rateLimiter map[string]interface{}) map[string]interface{} {
+	netCfg := map[string]interface{}{
+		"tap": tapName,
+	}
+	if len(rateLimiter) > 0 {
+		netCfg["rate_limiter_config"] = rateLimiter
+	}
+	return netCfg
 }
 
 // SnapshotVM captures paused Cloud Hypervisor state into destDir via PUT /api/v1/vm.snapshot.
@@ -671,7 +692,7 @@ func setupNAT(tapName, guestIP string) error {
 	return nil
 }
 
-// removeNAT removes iptables rules for a guest. Best-effort — ignores errors.
+// removeNAT removes iptables rules for a guest. Best-effort - ignores errors.
 func removeNAT(tapName, guestIP string) {
 	src := guestIP + "/30"
 	runCmd("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", src, "-j", "MASQUERADE")

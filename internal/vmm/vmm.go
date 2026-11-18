@@ -43,7 +43,7 @@ func (t RootFSType) String() string {
 
 // RootFS describes a root filesystem for a VM.
 // libkrun expects a directory. Cloud Hypervisor expects a raw block image.
-// Core never assumes the format — the backend declares what it needs
+// Core never assumes the format - the backend declares what it needs
 // via Capabilities().RootFSType, and the image pipeline produces the right artifact.
 type RootFS struct {
 	Type RootFSType
@@ -79,6 +79,14 @@ type VMConfig struct {
 	// for Linux KSM Copy-on-Write page deduplication when shared vhost-user DMA
 	// (WorkspacePath) is not active.
 	MergeableMemory bool
+
+	// DiskRateLimiter holds an optional Cloud Hypervisor RateLimiterConfig map
+	// applied to the root virtio-blk device.
+	DiskRateLimiter map[string]interface{}
+
+	// NetRateLimiter holds an optional Cloud Hypervisor RateLimiterConfig map
+	// applied to the guest virtio-net tap interface.
+	NetRateLimiter map[string]interface{}
 }
 
 // Snapshotter is an optional extension implemented by VMM backends that support
@@ -106,7 +114,7 @@ type BackendCaps struct {
 
 	// PersistentPause indicates that paused VMs retain state indefinitely
 	// without needing to be stopped. When true, the lifecycle manager skips
-	// the PAUSED → STOPPED transition entirely — the OS manages memory
+	// the PAUSED → STOPPED transition entirely - the OS manages memory
 	// pressure via swap. When false (e.g. Cloud Hypervisor/KVM), paused VMs
 	// should be stopped after a timeout to free hypervisor resources.
 	PersistentPause bool
@@ -138,13 +146,13 @@ func (c BackendCaps) String() string {
 //   - Each message is exactly one complete JSON-RPC 2.0 object.
 //   - Send writes one message. Recv returns one message.
 //   - The wire encoding is newline-delimited JSON (one JSON object per line).
-//   - Implementations handle framing internally — callers never see delimiters.
+//   - Implementations handle framing internally - callers never see delimiters.
 //
 // Core code uses ControlChannel for all harness communication. It never
-// sees TCP, vsock, or unix sockets — only Send/Recv/Close.
+// sees TCP, vsock, or unix sockets - only Send/Recv/Close.
 type ControlChannel interface {
 	// Send writes exactly one JSON-RPC message to the harness.
-	// msg must be a complete JSON object (no trailing newline required —
+	// msg must be a complete JSON object (no trailing newline required -
 	// the implementation adds framing).
 	// Respects the context deadline for write timeout.
 	Send(ctx context.Context, msg []byte) error
@@ -159,7 +167,7 @@ type ControlChannel interface {
 }
 
 // VMM is the virtual machine manager interface.
-// All ovmd core logic calls this interface — it never knows which backend is active.
+// All ovmd core logic calls this interface - it never knows which backend is active.
 type VMM interface {
 	// CreateVM creates a new VM with the given configuration.
 	// The VM is created but not started.
@@ -167,7 +175,7 @@ type VMM interface {
 
 	// StartVM starts a previously created VM and returns a ControlChannel
 	// for communicating with the guest harness.
-	// The channel is ready to use when StartVM returns — the backend handles
+	// The channel is ready to use when StartVM returns - the backend handles
 	// all transport setup (TCP listener + accept for libkrun, vsock for Cloud Hypervisor).
 	StartVM(h Handle) (ControlChannel, error)
 

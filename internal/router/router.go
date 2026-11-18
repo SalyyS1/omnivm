@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/lifecycle"
 )
 
@@ -320,7 +321,7 @@ func (r *Router) handlePortConn(ctx context.Context, clientConn net.Conn, pp *po
 	}
 
 	// Dial backend with readiness probing; app may still be binding its port.
-	r.relay(ctx, clientConn, backend, 15*time.Second)
+	r.relay(ctx, clientConn, backend, pp.instanceID, 15*time.Second)
 }
 
 // dialBackend connects to the backend with retries using context.Background().
@@ -371,8 +372,9 @@ func connAlive(tc *net.TCPConn) bool {
 	return alive
 }
 
-// relay does bidirectional TCP copy between client and backend.
-func (r *Router) relay(ctx context.Context, clientConn net.Conn, backend string, dialTimeout time.Duration) {
+// relay does bidirectional TCP copy between client and backend, applying
+// multi-tenant token-bucket net QoS shaping when configured.
+func (r *Router) relay(ctx context.Context, clientConn net.Conn, backend string, instanceID string, dialTimeout time.Duration) {
 	backendConn, err := r.dialBackendContext(ctx, backend, dialTimeout)
 	if err != nil {
 		log.Printf("router: dial backend %s: %v", backend, err)
@@ -380,13 +382,31 @@ func (r *Router) relay(ctx context.Context, clientConn net.Conn, backend string,
 	}
 	defer backendConn.Close()
 
+	var clientReader io.Reader = clientConn
+	var backendReader io.Reader = backendConn
+	if r.lm != nil && instanceID != "" {
+		if qg := r.lm.IOQoSGovernor(); qg != nil {
+			tenantID := ioqos.DefaultTenantID
+			hasInstQoS := false
+			if inst := r.lm.GetInstance(instanceID); inst != nil {
+				snap := inst.Snapshot()
+				tenantID = ioqos.NormalizeTenantID(snap.TenantID)
+				hasInstQoS = snap.IOQoS != nil && !snap.IOQoS.IsZero()
+			}
+			if qg.Mode() != ioqos.ModeOff || hasInstQoS {
+				clientReader = qg.ShapeReader(ctx, clientConn, tenantID, instanceID, ioqos.ChannelNetBandwidth, ioqos.ChannelNetOps)
+				backendReader = qg.ShapeReader(ctx, backendConn, tenantID, instanceID, ioqos.ChannelNetBandwidth, ioqos.ChannelNetOps)
+			}
+		}
+	}
+
 	done := make(chan struct{}, 2)
 	go func() {
-		io.Copy(backendConn, clientConn)
+		io.Copy(backendConn, clientReader)
 		done <- struct{}{}
 	}()
 	go func() {
-		io.Copy(clientConn, backendConn)
+		io.Copy(clientConn, backendReader)
 		done <- struct{}{}
 	}()
 	<-done

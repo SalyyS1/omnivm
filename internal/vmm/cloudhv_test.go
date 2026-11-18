@@ -78,3 +78,27 @@ func TestCloudHypervisorVMM_SnapshotVMUnixSocketAPI(t *testing.T) {
 		t.Errorf("destination_url = %q, want %q", gotDest, "file://"+snapDir)
 	}
 }
+
+func TestBuildCHDiskAndNetPayloads_RateLimiterConfig(t *testing.T) {
+	// Default nil rateLimiter omits rate_limiter_config cleanly.
+	plainDisk := buildCHDiskPayload("/tmp/root.ext4", nil)
+	if _, ok := plainDisk["rate_limiter_config"]; ok {
+		t.Fatalf("unexpected rate_limiter_config on default disk payload: %+v", plainDisk)
+	}
+	plainNet := buildCHNetPayload("ovm0", nil)
+	if _, ok := plainNet["rate_limiter_config"]; ok {
+		t.Fatalf("unexpected rate_limiter_config on default net payload: %+v", plainNet)
+	}
+
+	rl := map[string]interface{}{
+		"bandwidth": map[string]interface{}{"size": uint64(10485760), "refill_time": uint64(100)},
+	}
+	qosDisk := buildCHDiskPayload("/tmp/root.ext4", rl)
+	if qosDisk["rate_limiter_config"] == nil {
+		t.Fatalf("expected rate_limiter_config on QoS disk payload")
+	}
+	qosNet := buildCHNetPayload("ovm0", rl)
+	if qosNet["rate_limiter_config"] == nil {
+		t.Fatalf("expected rate_limiter_config on QoS net payload")
+	}
+}

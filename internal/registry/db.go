@@ -1,5 +1,5 @@
 // Package registry provides persistent storage for ovm instance state.
-// Uses pure-Go SQLite (modernc.org/sqlite) — no cgo required.
+// Uses pure-Go SQLite (modernc.org/sqlite) - no cgo required.
 package registry
 
 import (
@@ -112,7 +112,7 @@ func (d *DB) migrate() error {
 		}
 	}
 
-	// Migrate from older schema versions (ignore errors — columns may already exist)
+	// Migrate from older schema versions (ignore errors - columns may already exist)
 	migrations := []string{
 		`ALTER TABLE instances ADD COLUMN handle TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE instances ADD COLUMN image_ref TEXT NOT NULL DEFAULT ''`,
@@ -129,6 +129,8 @@ func (d *DB) migrate() error {
 		`ALTER TABLE instances ADD COLUMN auto_workspace INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE instances ADD COLUMN disk_mb INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE instances ADD COLUMN source_snapshot_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN tenant_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE instances ADD COLUMN io_qos TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range migrations {
 		d.db.Exec(stmt)

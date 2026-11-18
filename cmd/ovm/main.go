@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/version"
 )
 
@@ -67,6 +68,10 @@ func main() {
 		cmdMetrics()
 	case "bench":
 		cmdBench()
+	case "qos":
+		cmdQoS()
+	case "seccomp":
+		cmdSeccomp()
 	case "doctor":
 		cmdDoctor()
 	case "instance":
@@ -101,7 +106,9 @@ Commands:
   run        Run a command in an ephemeral microVM (start + follow + delete)
   status     Show daemon status
   metrics    Export daemon telemetry (--prometheus or --json)
-  bench      Run host microVM subsystem benchmarks (prefault)
+  bench      Run host microVM subsystem benchmarks (prefault, ioqos)
+  qos        Manage multi-tenant virtio-blk and virtio-net I/O QoS policies
+  seccomp    Audit or generate Linux seccomp-bpf syscall profiles (--sarif supported)
   doctor     Print platform and backend info
   instance   Manage instances (start, branch, list, info, disable, delete, pause, resume, prune)
   snapshot   Manage Copy-on-Write microVM snapshots and branches (create, list, info, branch, delete)
@@ -345,9 +352,19 @@ type exposeFlag struct {
 	Protocol   string // "http", "tcp", etc. Default: "http"
 }
 
-// parseRunFlags parses common flags: --name, --secret, --image, --workspace, --disk-size
-func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, diskMB int, command []string) {
+// parseRunFlags parses common flags: --name, --secret, --image, --workspace, --disk-size, --tenant, and --blk-*/--net-* QoS flags.
+func parseRunFlags(args []string) (name, imageRef string, envVars map[string]string, secretKeys []string, workspace string, diskMB int, tenantID string, ioQoS *ioqos.InstancePolicy, command []string) {
 	envVars = make(map[string]string)
+	var qosPol ioqos.InstancePolicy
+
+	parsePosInt := func(flagName, val string) int {
+		n, err := strconv.Atoi(val)
+		if err != nil || n <= 0 {
+			fmt.Fprintf(os.Stderr, "invalid %s %q: expected a positive integer\n", flagName, val)
+			os.Exit(1)
+		}
+		return n
+	}
 
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--" {
@@ -388,14 +405,54 @@ func parseRunFlags(args []string) (name, imageRef string, envVars map[string]str
 				fmt.Fprintln(os.Stderr, "--disk-size requires a size in MB")
 				os.Exit(1)
 			}
-			mb, err := strconv.Atoi(args[i+1])
-			if err != nil || mb <= 0 {
-				fmt.Fprintf(os.Stderr, "invalid --disk-size %q: expected a positive number of MB\n", args[i+1])
+			diskMB = parsePosInt("--disk-size", args[i+1])
+			i++
+		case "--tenant":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--tenant requires a tenant ID")
 				os.Exit(1)
 			}
-			diskMB = mb
+			tenantID = args[i+1]
+			i++
+		case "--blk-mbps":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--blk-mbps requires an integer MiB/s")
+				os.Exit(1)
+			}
+			qosPol.MaxBlkMBps = parsePosInt("--blk-mbps", args[i+1])
+			i++
+		case "--blk-iops":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--blk-iops requires an integer IOPS")
+				os.Exit(1)
+			}
+			qosPol.MaxBlkIOPS = parsePosInt("--blk-iops", args[i+1])
+			i++
+		case "--net-mbps":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--net-mbps requires an integer MiB/s")
+				os.Exit(1)
+			}
+			qosPol.MaxNetMBps = parsePosInt("--net-mbps", args[i+1])
+			i++
+		case "--net-pps":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--net-pps requires an integer PPS")
+				os.Exit(1)
+			}
+			qosPol.MaxNetPPS = parsePosInt("--net-pps", args[i+1])
+			i++
+		case "--qos-weight":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "--qos-weight requires an integer weight")
+				os.Exit(1)
+			}
+			qosPol.Weight = parsePosInt("--qos-weight", args[i+1])
 			i++
 		}
+	}
+	if !qosPol.IsZero() {
+		ioQoS = &qosPol
 	}
 	return
 }
@@ -448,7 +505,7 @@ func parseExposeArg(arg string) exposeFlag {
 func cmdRun() {
 	args := os.Args[2:]
 
-	name, imageRef, envVars, secretKeys, workspace, diskMB, command := parseRunFlags(args)
+	name, imageRef, envVars, secretKeys, workspace, diskMB, tenantID, ioQoS, command := parseRunFlags(args)
 
 	if len(command) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: ovm run [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
@@ -493,6 +550,12 @@ func cmdRun() {
 	}
 	if len(secretKeys) > 0 {
 		reqBody["secrets"] = secretKeys
+	}
+	if tenantID != "" {
+		reqBody["tenant_id"] = tenantID
+	}
+	if ioQoS != nil {
+		reqBody["io_qos"] = ioQoS
 	}
 
 	bodyJSON, _ := json.Marshal(reqBody)
@@ -932,7 +995,7 @@ Examples:
 func cmdInstanceStart(client *http.Client) {
 	args := os.Args[3:]
 
-	name, imageRef, envVars, secretKeys, workspace, diskMB, command := parseRunFlags(args)
+	name, imageRef, envVars, secretKeys, workspace, diskMB, tenantID, ioQoS, command := parseRunFlags(args)
 
 	if len(command) == 0 && name == "" {
 		fmt.Fprintln(os.Stderr, "usage: ovm instance start [--name NAME] [--secret KEY] [--image IMAGE] -- COMMAND [args...]")
@@ -960,6 +1023,12 @@ func cmdInstanceStart(client *http.Client) {
 	}
 	if len(secretKeys) > 0 {
 		reqBody["secrets"] = secretKeys
+	}
+	if tenantID != "" {
+		reqBody["tenant_id"] = tenantID
+	}
+	if ioQoS != nil {
+		reqBody["io_qos"] = ioQoS
 	}
 	if workspace != "" {
 		reqBody["workspace"] = workspace

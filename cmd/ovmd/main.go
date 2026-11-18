@@ -20,6 +20,7 @@ import (
 	"github.com/SalyyS1/omnivm/internal/api"
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/image"
+	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/lifecycle"
 	"github.com/SalyyS1/omnivm/internal/logstore"
 	"github.com/SalyyS1/omnivm/internal/overlay"
@@ -283,6 +284,15 @@ func main() {
 				var caps lifecycle.CapabilityToken
 				if json.Unmarshal([]byte(ri.Capabilities), &caps) == nil {
 					opts = append(opts, lifecycle.WithCapabilities(&caps))
+				}
+			}
+			if ri.TenantID != "" {
+				opts = append(opts, lifecycle.WithTenantID(ri.TenantID))
+			}
+			if ri.IOQoS != "" {
+				var qPol ioqos.InstancePolicy
+				if json.Unmarshal([]byte(ri.IOQoS), &qPol) == nil {
+					opts = append(opts, lifecycle.WithIOQoS(&qPol))
 				}
 			}
 
