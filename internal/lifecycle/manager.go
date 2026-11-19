@@ -33,11 +33,13 @@ import (
 	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/ksm"
 	"github.com/SalyyS1/omnivm/internal/logstore"
+	"github.com/SalyyS1/omnivm/internal/netpolicy"
 	"github.com/SalyyS1/omnivm/internal/overlay"
 	"github.com/SalyyS1/omnivm/internal/registry"
 	"github.com/SalyyS1/omnivm/internal/secrets"
 	"github.com/SalyyS1/omnivm/internal/telemetry"
 	"github.com/SalyyS1/omnivm/internal/tether"
+	"github.com/SalyyS1/omnivm/internal/virtiofs"
 	"github.com/SalyyS1/omnivm/internal/vmm"
 )
 
@@ -334,6 +336,8 @@ type LifecycleMetrics struct {
 	ActiveConnections int                `json:"active_connections"`
 	DiskPrewarm       diskwarm.Metrics   `json:"disk_prewarm"`
 	IOQoS             ioqos.Metrics      `json:"io_qos"`
+	VirtioFS          virtiofs.Metrics   `json:"virtiofs"`
+	NetPolicy         netpolicy.Metrics  `json:"net_policy"`
 	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 
@@ -402,10 +406,12 @@ type Manager struct {
 	secretStore *secrets.Store
 	registry    *registry.DB
 	tetherStore *tether.Store
-	ksmGov      *ksm.Governor
-	cgroupGov   *cgroup.Governor
-	diskWarmer  *diskwarm.Warmer
-	ioqosGov    *ioqos.Governor
+	ksmGov       *ksm.Governor
+	cgroupGov    *cgroup.Governor
+	diskWarmer   *diskwarm.Warmer
+	ioqosGov     *ioqos.Governor
+	virtiofsPool *virtiofs.Pool
+	netFirewall  *netpolicy.Firewall
 
 	coldBootHist      *telemetry.Histogram
 	warmResumeHist    *telemetry.Histogram
@@ -428,8 +434,11 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 	cgroupMode := cgroup.ModeOff
 	diskWarmMode := diskwarm.ModeAuto
 	ioqosMode := ioqos.ModeOff
+	vfsMode := virtiofs.ModeOff
+	netPolMode := netpolicy.ModeOff
 	var cgroupRatio float64
 	var diskWarmBudget uint64
+	var vfsWinBytes, vfsPoolBytes, vfsCacheBytes uint64
 	var defTenantPol ioqos.TenantPolicy
 	if cfg != nil {
 		if cfg.KSMGovernor != "" {
@@ -455,6 +464,21 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 			MaxNetMBps: cfg.TenantNetMBps,
 			MaxNetPPS:  cfg.TenantNetPPS,
 		}
+		if cfg.VirtioFSPool != "" {
+			vfsMode = cfg.VirtioFSPool
+		}
+		if cfg.VirtioFSDAXWindowMB > 0 {
+			vfsWinBytes = uint64(cfg.VirtioFSDAXWindowMB) * 1024 * 1024
+		}
+		if cfg.VirtioFSMaxPoolMB > 0 {
+			vfsPoolBytes = uint64(cfg.VirtioFSMaxPoolMB) * 1024 * 1024
+		}
+		if cfg.VirtioFSCacheMB > 0 {
+			vfsCacheBytes = uint64(cfg.VirtioFSCacheMB) * 1024 * 1024
+		}
+		if cfg.NetPolicyMode != "" {
+			netPolMode = cfg.NetPolicyMode
+		}
 	}
 	return &Manager{
 		instances:         make(map[string]*Instance),
@@ -468,6 +492,8 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		cgroupGov:         cgroup.NewGovernor("", cgroupMode, cgroupRatio),
 		diskWarmer:        diskwarm.NewWarmer(diskwarm.Config{Mode: diskWarmMode, BudgetBytes: diskWarmBudget}),
 		ioqosGov:          ioqos.NewGovernor(ioqos.Config{Mode: ioqosMode, DefaultPolicy: defTenantPol}),
+		virtiofsPool:      virtiofs.NewPool(virtiofs.Config{Mode: vfsMode, DefaultWindowBytes: vfsWinBytes, MaxPoolBytes: vfsPoolBytes, MaxCacheBytes: vfsCacheBytes}),
+		netFirewall:       netpolicy.NewFirewall(netPolMode),
 		coldBootHist:      telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		warmResumeHist:    telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		coalescedWaitHist: telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
@@ -551,6 +577,34 @@ func (m *Manager) IOQoSGovernor() *ioqos.Governor {
 	return m.ioqosGov
 }
 
+// SetVirtioFSPool overrides the shared Virtio-FS / Virtio-PMEM DAX cache pool.
+func (m *Manager) SetVirtioFSPool(pool *virtiofs.Pool) {
+	m.mu.Lock()
+	m.virtiofsPool = pool
+	m.mu.Unlock()
+}
+
+// VirtioFSPool returns the active Virtio-FS / Virtio-PMEM DAX cache pool.
+func (m *Manager) VirtioFSPool() *virtiofs.Pool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.virtiofsPool
+}
+
+// SetNetPolicyFirewall overrides the per-tenant egress CIDR/DNS policy firewall.
+func (m *Manager) SetNetPolicyFirewall(fw *netpolicy.Firewall) {
+	m.mu.Lock()
+	m.netFirewall = fw
+	m.mu.Unlock()
+}
+
+// NetPolicyFirewall returns the active per-tenant egress CIDR/DNS policy firewall.
+func (m *Manager) NetPolicyFirewall() *netpolicy.Firewall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.netFirewall
+}
+
 // InstanceCounts returns a race-free breakdown of instances by state.
 func (m *Manager) InstanceCounts() InstanceStateCounts {
 	list := m.ListInstances()
@@ -596,6 +650,14 @@ func (m *Manager) Metrics() LifecycleMetrics {
 	if qg := m.IOQoSGovernor(); qg != nil {
 		qosMetrics = qg.Metrics()
 	}
+	var vfsMetrics virtiofs.Metrics
+	if vp := m.VirtioFSPool(); vp != nil {
+		vfsMetrics = vp.Metrics()
+	}
+	var netPolMetrics netpolicy.Metrics
+	if nf := m.NetPolicyFirewall(); nf != nil {
+		netPolMetrics = nf.Metrics()
+	}
 	var wakeLatency WakeLatencyMetrics
 	if m.coldBootHist != nil {
 		wakeLatency.ColdBoot = m.coldBootHist.Snapshot()
@@ -623,6 +685,8 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		ActiveConnections: activeConns,
 		DiskPrewarm:       dwMetrics,
 		IOQoS:             qosMetrics,
+		VirtioFS:          vfsMetrics,
+		NetPolicy:         netPolMetrics,
 		WakeLatency:       wakeLatency,
 	}
 }
@@ -1197,6 +1261,21 @@ func (m *Manager) finishBootFromStarting(
 		}
 	}
 
+	var vfsOpts *vmm.VirtioFSOptions
+	if wsPath != "" {
+		if vp := m.VirtioFSPool(); vp != nil && vp.Mode() != virtiofs.ModeOff {
+			if plan, pErr := vp.PlanMount(inst.ID, "workspace", "", wsPath, memoryMB, vcpus, ""); pErr == nil {
+				vfsOpts = &vmm.VirtioFSOptions{
+					CachePolicy:    plan.CachePolicy,
+					ThreadPoolSize: plan.ThreadPoolSize,
+					NumQueues:      plan.NumQueues,
+					QueueSize:      plan.QueueSize,
+					DAXWindowBytes: plan.DAXWindowBytes,
+				}
+			}
+		}
+	}
+
 	vmCfg := vmm.VMConfig{
 		Rootfs: vmm.RootFS{
 			Type: m.vmm.Capabilities().RootFSType,
@@ -1209,6 +1288,7 @@ func (m *Manager) finishBootFromStarting(
 		MergeableMemory: m.cfg != nil && m.cfg.MemoryDedup,
 		DiskRateLimiter: diskRL,
 		NetRateLimiter:  netRL,
+		VirtioFS:        vfsOpts,
 	}
 
 	handle, err := m.vmm.CreateVM(vmCfg)
@@ -2745,8 +2825,19 @@ func (m *Manager) notifyStateChange(id, state string) {
 		fn(id, state)
 	}
 	m.reconcileIOQoS(inst, id, state)
+	m.reconcileVirtioFS(inst, id, state)
 	m.reconcileKSM()
 	m.reconcileCgroup()
+}
+
+func (m *Manager) reconcileVirtioFS(inst *Instance, id, state string) {
+	vp := m.VirtioFSPool()
+	if vp == nil {
+		return
+	}
+	if inst == nil || state == StateStopped {
+		vp.ReleaseInstance(id)
+	}
 }
 
 func (m *Manager) reconcileIOQoS(inst *Instance, id, state string) {

@@ -142,6 +142,29 @@ type Config struct {
 
 	// TenantNetPPS caps default per-tenant aggregate virtio-net packet rate in PPS (0 = unlimited).
 	TenantNetPPS int
+
+	// VirtioFSPool controls the shared Virtio-FS and Virtio-PMEM DAX cache pool:
+	// "off" (legacy --cache=never, default), "auto" (multi-queue + 2 MiB DAX window
+	// for VMs >= 256 MB), or "dax" (always-on DAX window + virtio-pmem base sharing).
+	// Set via OVM_VIRTIOFS_POOL.
+	VirtioFSPool string
+
+	// VirtioFSDAXWindowMB sets the target per-VM DAX window in MiB (0 uses 256 MiB default).
+	// Set via OVM_VIRTIOFS_DAX_WINDOW_MB.
+	VirtioFSDAXWindowMB int
+
+	// VirtioFSMaxPoolMB caps aggregate host DAX virtual mappings in MiB across active VMs
+	// (0 uses 4096 MiB default). Set via OVM_DAX_POOL_MB.
+	VirtioFSMaxPoolMB int
+
+	// VirtioFSCacheMB caps shared read-only base layer cache capacity in MiB
+	// (0 uses 8192 MiB default). Set via OVM_VIRTIOFS_CACHE_MB.
+	VirtioFSCacheMB int
+
+	// NetPolicyMode controls the per-tenant egress CIDR/DNS firewall:
+	// "off" (default), "audit" (log/count policy denials without blocking), or "enforce".
+	// Set via OVM_NET_POLICY_MODE.
+	NetPolicyMode string
 }
 
 // DefaultConfig returns the default configuration.
@@ -174,6 +197,14 @@ func DefaultConfig() *Config {
 	ioQosMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_IO_QOS_GOVERNOR")))
 	if ioQosMode == "" {
 		ioQosMode = "off"
+	}
+	vfsPoolMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_VIRTIOFS_POOL")))
+	if vfsPoolMode == "" {
+		vfsPoolMode = "off"
+	}
+	netPolMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_NET_POLICY_MODE")))
+	if netPolMode == "" {
+		netPolMode = "off"
 	}
 
 	return &Config{
@@ -211,6 +242,11 @@ func DefaultConfig() *Config {
 		TenantBlkIOPS:         parseOptionalEnvInt("OVM_TENANT_BLK_IOPS"),
 		TenantNetMBps:         parseOptionalEnvInt("OVM_TENANT_NET_MBPS"),
 		TenantNetPPS:          parseOptionalEnvInt("OVM_TENANT_NET_PPS"),
+		VirtioFSPool:          vfsPoolMode,
+		VirtioFSDAXWindowMB:   parseOptionalEnvInt("OVM_VIRTIOFS_DAX_WINDOW_MB"),
+		VirtioFSMaxPoolMB:     parseOptionalEnvInt("OVM_DAX_POOL_MB"),
+		VirtioFSCacheMB:       parseOptionalEnvInt("OVM_VIRTIOFS_CACHE_MB"),
+		NetPolicyMode:         netPolMode,
 	}
 }
 
@@ -340,6 +376,25 @@ func (c *Config) Validate() error {
 	}
 	if c.TenantBlkMBps < 0 || c.TenantBlkIOPS < 0 || c.TenantNetMBps < 0 || c.TenantNetPPS < 0 {
 		return errors.New("tenant QoS limits (blk_mbps, blk_iops, net_mbps, net_pps) must be non-negative")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.VirtioFSPool)) {
+	case "", "off", "auto", "dax":
+	default:
+		return fmt.Errorf("unsupported virtiofs_pool %q: expected off, auto, or dax", c.VirtioFSPool)
+	}
+	if c.VirtioFSDAXWindowMB < 0 || c.VirtioFSDAXWindowMB > 64*1024 {
+		return fmt.Errorf("virtiofs_dax_window_mb must be between 0 and %d, got %d", 64*1024, c.VirtioFSDAXWindowMB)
+	}
+	if c.VirtioFSMaxPoolMB < 0 || c.VirtioFSMaxPoolMB > 1024*1024 {
+		return fmt.Errorf("virtiofs_max_pool_mb must be between 0 and %d, got %d", 1024*1024, c.VirtioFSMaxPoolMB)
+	}
+	if c.VirtioFSCacheMB < 0 || c.VirtioFSCacheMB > 1024*1024 {
+		return fmt.Errorf("virtiofs_cache_mb must be between 0 and %d, got %d", 1024*1024, c.VirtioFSCacheMB)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.NetPolicyMode)) {
+	case "", "off", "audit", "enforce":
+	default:
+		return fmt.Errorf("unsupported net_policy_mode %q: expected off, audit, or enforce", c.NetPolicyMode)
 	}
 	if c.DNSServer != "" {
 		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {

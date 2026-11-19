@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/SalyyS1/omnivm/internal/blob"
+	"github.com/SalyyS1/omnivm/internal/netpolicy"
 	"github.com/SalyyS1/omnivm/internal/version"
 )
 
@@ -409,6 +410,39 @@ var tools = []mcpTool{
 				"exclude_ports": {"type": "boolean", "description": "Do not inherit exposed ports from source"},
 				"start":         {"type": "boolean", "description": "Boot immediately (default true) or register stopped for wake-on-request (false)"}
 			}
+		}`),
+	},
+	{
+		Name:        "netpolicy_audit",
+		Description: "Statically audit a per-tenant microVM egress CIDR/DNS policy JSON against OVM-NET-001..008 (IMDS SSRF, lateral movement, anti-spoofing, DNS exfiltration, rule shadowing) with optional OASIS SARIF v2.1.0 output.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"policy": {"type": "object", "description": "TenantNetPolicy JSON object to audit"},
+				"format": {"type": "string", "enum": ["json", "sarif"], "description": "Output format (json or sarif)"}
+			},
+			"required": ["policy"]
+		}`),
+	},
+	{
+		Name:        "netpolicy_compile",
+		Description: "Compile a validated per-tenant microVM egress CIDR/DNS policy into an atomic Linux nftables inet ruleset script.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"policy":   {"type": "object", "description": "TenantNetPolicy JSON object"},
+				"tap_name": {"type": "string", "description": "Host tap interface name (default ovm0)"},
+				"guest_ip": {"type": "string", "description": "Assigned guest /30 IPv4 address (default 172.16.0.2)"}
+			},
+			"required": ["policy"]
+		}`),
+	},
+	{
+		Name:        "virtiofs_status",
+		Description: "Inspect the shared Virtio-FS and Virtio-PMEM DAX rootfs cache pool, active 2 MiB DAX window allocations, and deduplication memory savings.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {}
 		}`),
 	},
 }
@@ -1064,6 +1098,9 @@ var toolHandlers = map[string]func(json.RawMessage) *mcpToolResult{
 	"snapshot_list":     handleSnapshotList,
 	"snapshot_delete":   handleSnapshotDelete,
 	"instance_branch":   handleInstanceBranch,
+	"netpolicy_audit":   handleNetPolicyAuditMCP,
+	"netpolicy_compile": handleNetPolicyCompileMCP,
+	"virtiofs_status":   handleVirtioFSStatusMCP,
 }
 
 func handleSnapshotCreate(args json.RawMessage) *mcpToolResult {
@@ -1179,6 +1216,59 @@ func handleInstanceBranch(args json.RawMessage) *mcpToolResult {
 		path = "/v1/instances/" + params.Instance + "/branch"
 	}
 	status, data, err := doRequest("POST", path, body)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
+}
+
+func handleNetPolicyAuditMCP(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Policy json.RawMessage `json:"policy"`
+		Format string          `json:"format"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil || len(params.Policy) == 0 {
+		return errorResult("policy object is required")
+	}
+	rep, err := netpolicy.AuditPolicyBytes(params.Policy, "mcp.netpolicy.json")
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if strings.EqualFold(strings.TrimSpace(params.Format), "sarif") {
+		sarifOut, _ := json.MarshalIndent(netpolicy.ToSARIF(rep, version.Version()), "", "  ")
+		return textResult(string(sarifOut))
+	}
+	out, _ := json.MarshalIndent(rep, "", "  ")
+	return textResult(string(out))
+}
+
+func handleNetPolicyCompileMCP(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Policy  netpolicy.TenantNetPolicy `json:"policy"`
+		TapName string                    `json:"tap_name"`
+		GuestIP string                    `json:"guest_ip"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil {
+		return errorResult("invalid arguments: " + err.Error())
+	}
+	if params.TapName == "" {
+		params.TapName = "ovm0"
+	}
+	if params.GuestIP == "" {
+		params.GuestIP = "172.16.0.2"
+	}
+	script, err := netpolicy.CompileNftables(params.Policy, params.TapName, params.GuestIP)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	return textResult(script)
+}
+
+func handleVirtioFSStatusMCP(_ json.RawMessage) *mcpToolResult {
+	status, data, err := doRequest("GET", "/v1/virtiofs", nil)
 	if err != nil {
 		return errorResult(err.Error())
 	}

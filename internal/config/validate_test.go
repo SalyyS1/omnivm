@@ -155,6 +155,18 @@ func TestConfigValidate_InvalidCases(t *testing.T) {
 			name:   "negative_tenant_blk_mbps",
 			mutate: func(c *Config) { c.TenantBlkMBps = -5 },
 		},
+		{
+			name:   "invalid_virtiofs_pool",
+			mutate: func(c *Config) { c.VirtioFSPool = "invalid" },
+		},
+		{
+			name:   "negative_virtiofs_dax_window_mb",
+			mutate: func(c *Config) { c.VirtioFSDAXWindowMB = -64 },
+		},
+		{
+			name:   "invalid_net_policy_mode",
+			mutate: func(c *Config) { c.NetPolicyMode = "permissive" },
+		},
 	}
 
 	for _, tc := range tests {

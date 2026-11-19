@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.8.0 | Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, proactive Linux KSM governor with spawn-burst scaling, sparse extent disk-cache pre-warming, virtio-vsock stream multiplexer, dynamic cgroup v2 memory.high watermark telemetry, Copy-on-Write microVM snapshot branching, and Prometheus/OpenMetrics wake latency histogram simulator for OmniVM v0.8.0." />
+  <title>OmniVM v0.9.0 | Scale-to-Zero KVM MicroVM, Virtio-FS/PMEM DAX Pool &amp; Egress Policy Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, shared Virtio-FS and Virtio-PMEM DAX rootfs cache pool, per-tenant egress CIDR/DNS firewall and nftables compiler (OVM-NET-001..008 SARIF v2.1.0), multi-tenant I/O QoS governor, seccomp auditor, proactive Linux KSM, and Prometheus/OpenMetrics simulator for OmniVM v0.9.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -319,15 +319,15 @@
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.8.0 Control Plane</span>
-        <h1>Scale-to-Zero KVM MicroVM, Proactive KSM, Disk Pre-Warm &amp; Wake Latency Simulator</h1>
+        <span class="badge">OmniVM v0.9.0 Control Plane</span>
+        <h1>Scale-to-Zero KVM MicroVM, Virtio-FS/PMEM DAX Pool &amp; Egress Policy Simulator</h1>
         <p class="subtitle">
-          Explore proactive Linux KSM memory deduplication (fleet-density burst scaling + NUMA locality), sparse-extent page-cache disk pre-warming (POSIX_FADV_WILLNEED), Copy-on-Write snapshot branching, virtio-vsock stream multiplexing, dynamic cgroup v2 watermarks, and Prometheus / OpenMetrics wake latency histograms.
+          Explore shared Virtio-FS and Virtio-PMEM DAX rootfs page-cache pooling, per-tenant egress CIDR/DNS firewalling with atomic nftables compilation and OVM-NET-001..008 SARIF v2.1.0 auditing, multi-tenant token-bucket I/O QoS, seccomp-bpf auditing, proactive KSM deduplication, and Copy-on-Write snapshot branching.
         </p>
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.8.0">Release v0.8.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.9.0">Release v0.9.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -528,6 +528,116 @@
         </div>
 
         <div id="sec-findings-view" style="max-height:180px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>
+          <span>Shared Virtio-FS &amp; Virtio-PMEM DAX Rootfs Cache Pool</span>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-primary" id="btn-vfs-bench">Simulate Fleet Mounts</button>
+            <button class="btn btn-sm" id="btn-vfs-reset">Reset</button>
+          </div>
+        </h2>
+        <p class="subtitle" style="font-size:12.5px;margin-bottom:12px;">
+          Maps read-only container base layers once in host page cache via virtio-pmem (discard_writes=true) and 2 MiB-aligned virtio-fs DAX windows, eliminating duplicate per-guest page caches across concurrent microVMs.
+        </p>
+
+        <div class="controls-row" style="grid-template-columns: repeat(4, 1fr);">
+          <div class="field">
+            <label for="vfs-mode">Pool Mode</label>
+            <select id="vfs-mode">
+              <option value="dax" selected>dax (cache=always + DAX)</option>
+              <option value="auto">auto (&gt;= 256 MB guest)</option>
+              <option value="off">off (private guest cache)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="vfs-vms">Concurrent VMs</label>
+            <input id="vfs-vms" type="number" min="1" max="32" step="1" value="8" />
+          </div>
+          <div class="field">
+            <label for="vfs-layer">Base Layer (MiB)</label>
+            <input id="vfs-layer" type="number" min="16" max="1024" step="16" value="128" />
+          </div>
+          <div class="field">
+            <label for="vfs-pool-max">Max DAX Pool (MiB)</label>
+            <input id="vfs-pool-max" type="number" min="128" max="16384" step="128" value="2048" />
+          </div>
+        </div>
+
+        <div class="meter-group">
+          <div class="meter-label">
+            <span>Private Guest Page-Cache Footprint vs Shared Host DAX Pool</span>
+            <span id="lbl-vfs-ram">1024 MiB private -&gt; 128 MiB shared</span>
+          </div>
+          <div class="meter-track">
+            <div class="bar-ksm" id="bar-vfs-shared" style="width:12.5%"></div>
+          </div>
+        </div>
+
+        <div class="kpi-grid" style="margin-top:10px;">
+          <div class="kpi"><div class="k-val" id="k-vfs-saved">896 MiB</div><div class="k-lbl">dedup_saved_bytes</div></div>
+          <div class="kpi"><div class="k-val" id="k-vfs-ratio">8.00x</div><div class="k-lbl">ram_reduction</div></div>
+          <div class="kpi"><div class="k-val" id="k-vfs-win">256 MiB</div><div class="k-lbl">dax_window_per_vm</div></div>
+          <div class="kpi"><div class="k-val" id="k-vfs-fb">0</div><div class="k-lbl">budget_fallbacks</div></div>
+        </div>
+
+        <div style="margin-top:8px;">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;">Synthesized virtiofsd CLI &amp; Cloud Hypervisor FsConfig / PmemConfig</div>
+          <pre id="vfs-plan-json" style="max-height:165px;"></pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span>Per-Tenant Egress CIDR/DNS Firewall &amp; nftables Compiler</span>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-primary" id="btn-np-audit">Audit Policy</button>
+            <button class="btn btn-sm" id="btn-np-probes">Run Probes</button>
+            <button class="btn btn-sm" id="btn-np-sarif">Export SARIF</button>
+          </div>
+        </h2>
+        <p class="subtitle" style="font-size:12.5px;margin-bottom:12px;">
+          Audits tenant egress policies against OVM-NET-001..008 (IMDS SSRF, RFC1918 lateral movement, source IP anti-spoofing, DNS exfiltration, rule shadowing) and compiles atomic Linux nftables inet rulesets.
+        </p>
+
+        <div class="controls-row" style="grid-template-columns: 1.3fr 0.8fr 0.9fr;">
+          <div class="field">
+            <label for="np-preset">Policy Preset</label>
+            <select id="np-preset">
+              <option value="vulnerable" selected>Permissive / Misconfigured (OVM-NET-001..008)</option>
+              <option value="strict_ai_sandbox">Hardened strict-ai-sandbox (100/100)</option>
+              <option value="package_build">Hardened package-build (100/100)</option>
+              <option value="airgapped">Hardened airgapped (100/100)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="np-tap">Tap Device</label>
+            <input id="np-tap" type="text" value="ovm0" />
+          </div>
+          <div class="field">
+            <label for="np-ip">Guest /30 IP</label>
+            <input id="np-ip" type="text" value="172.16.0.2" />
+          </div>
+        </div>
+
+        <div style="margin-bottom:10px;">
+          <textarea id="np-policy-json" style="width:100%;height:125px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px;border-radius:6px;resize:vertical;"></textarea>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">Security Posture &amp; Probe Verdicts:</span>
+          <span id="np-badge-summary" class="badge-err">Score 0/100</span>
+        </div>
+
+        <div id="np-findings-view" style="max-height:135px;overflow-y:auto;margin-bottom:8px;"></div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;">Compiled Atomic Linux nftables Script (table inet)</div>
+          <pre id="np-nft-out" style="max-height:130px;"></pre>
+        </div>
       </div>
     </div>
 
@@ -805,7 +915,7 @@
 
         if (format === "json") {
           return JSON.stringify({
-            version: "v0.4.0",
+            version: "v0.9.0",
             backend: "cloud-hypervisor",
             instances: { total: fleet.length, running, starting: 0, paused, stopped, disabled: 0 },
             resources: {
@@ -1263,7 +1373,7 @@
             tool: {
               driver: {
                 name: "OmniVM Seccomp Auditor",
-                version: "0.8.0",
+                version: "0.9.0",
                 informationUri: "https://github.com/SalyyS1/omnivm",
                 rules: seccompCatalog.map(r => ({
                   id: r.id,
@@ -1322,6 +1432,443 @@
       document.getElementById("sec-profile-json").value = JSON.stringify(seccompPresets.dangerous, null, 2);
       renderQoS();
       auditSeccomp();
+
+      // --- OmniVM v0.9.0: Virtio-FS / Virtio-PMEM DAX Pool & Per-Tenant Egress Policy Lab ---
+      const netPolicyCatalog = [
+        { id: "OVM-NET-001", name: "DefaultAllowUnrestrictedEgress", severity: "error", cvss: "8.6", summary: "Network policy uses permissive default_egress=allow or allows unrestricted 0.0.0.0/0 traffic across all ports.", remediation: "Set default_egress to deny and scope outbound allow rules to explicit destination CIDRs, protocols, and TCP/UDP ports." },
+        { id: "OVM-NET-002", name: "CloudMetadataSSRFExposure", severity: "error", cvss: "9.3", summary: "Cloud instance metadata protection (block_metadata) is disabled or an explicit rule permits 169.254.169.254.", remediation: "Enable block_metadata: true and remove any allow rules covering 169.254.169.254/32 or 169.254.0.0/16." },
+        { id: "OVM-NET-003", name: "CrossVMLateralMovementExposure", severity: "error", cvss: "8.8", summary: "Private network isolation (block_private_networks) is disabled or an allow rule exposes sibling microVM / RFC1918 subnets.", remediation: "Enable block_private_networks: true and avoid broad allow rules over 172.16.0.0/12, 10.0.0.0/8, or 192.168.0.0/16." },
+        { id: "OVM-NET-004", name: "MissingSourceAntiSpoofing", severity: "error", cvss: "8.1", summary: "Source IP anti-spoofing (anti_spoofing) is disabled on the guest tap interface.", remediation: "Enable anti_spoofing: true so the host nftables chain drops packets whose source IPv4 differs from the assigned /30 guest IP." },
+        { id: "OVM-NET-005", name: "UnrestrictedDNSExfiltrationVector", severity: "warning", cvss: "7.4", summary: "Outbound DNS is allowed without pinning allowed_resolvers, permits wildcard '*', or opens port 53 to 0.0.0.0/0.", remediation: "Pin allowed_resolvers to trusted recursive resolvers and replace wildcard '*' DNS rules with explicit domain allowlists." },
+        { id: "OVM-NET-006", name: "HighRiskCleartextOrAdminPorts", severity: "warning", cvss: "7.1", summary: "CIDR allow rule exposes sensitive admin or lateral-movement ports (22, 23, 25, 445, 2375, 3389, 6379, 6443, 10250) on a broad prefix.", remediation: "Restrict administrative ports to narrow /32 host endpoints or limit sandbox egress to port 443." },
+        { id: "OVM-NET-007", name: "ShadowedOrUnreachableFirewallRule", severity: "warning", cvss: "5.3", summary: "A CIDR or DNS firewall rule is completely shadowed by an earlier broader rule and can never be reached.", remediation: "Order specific deny/allow subnet and subdomain rules before broader superset prefixes or wildcard patterns." },
+        { id: "OVM-NET-008", name: "BroadWildcardTLDAllowlist", severity: "warning", cvss: "6.5", summary: "DNS allowlist permits an entire top-level domain (such as *.com, *.io, or *.org), enabling attacker-controlled domain exfiltration.", remediation: "Scope wildcard DNS rules to concrete registrable second-level domains (for example *.pythonhosted.org instead of *.org)." }
+      ];
+
+      const netPolicyPresets = {
+        vulnerable: {
+          tenant_id: "untrusted-agent",
+          default_egress: "allow",
+          block_metadata: false,
+          block_private_networks: false,
+          anti_spoofing: false,
+          allowed_resolvers: [],
+          cidr_rules: [
+            { cidr: "0.0.0.0/0", action: "allow", protocol: "tcp", ports: [{ from: 22, to: 443 }] },
+            { cidr: "172.16.0.0/16", action: "deny", protocol: "tcp", ports: [{ from: 22, to: 22 }] },
+            { cidr: "169.254.169.254/32", action: "allow", protocol: "tcp", ports: [{ from: 80, to: 80 }] }
+          ],
+          dns_rules: [
+            { pattern: "*", action: "allow" },
+            { pattern: "*.com", action: "allow" }
+          ]
+        },
+        strict_ai_sandbox: {
+          tenant_id: "acme-ai",
+          default_egress: "deny",
+          block_metadata: true,
+          block_private_networks: true,
+          anti_spoofing: true,
+          allowed_resolvers: ["1.1.1.1", "9.9.9.9"],
+          cidr_rules: [
+            { cidr: "0.0.0.0/0", action: "allow", protocol: "tcp", ports: [{ from: 443, to: 443 }], description: "HTTPS API egress" }
+          ],
+          dns_rules: [
+            { pattern: "api.openai.com", action: "allow" },
+            { pattern: "api.anthropic.com", action: "allow" },
+            { pattern: "*.githubusercontent.com", action: "allow" }
+          ]
+        },
+        package_build: {
+          tenant_id: "ci-builder",
+          default_egress: "deny",
+          block_metadata: true,
+          block_private_networks: true,
+          anti_spoofing: true,
+          allowed_resolvers: ["1.1.1.1", "8.8.8.8"],
+          cidr_rules: [
+            { cidr: "0.0.0.0/0", action: "allow", protocol: "tcp", ports: [{ from: 443, to: 443 }], description: "HTTPS package mirrors" }
+          ],
+          dns_rules: [
+            { pattern: "pypi.org", action: "allow" },
+            { pattern: "*.pythonhosted.org", action: "allow" },
+            { pattern: "registry.npmjs.org", action: "allow" },
+            { pattern: "proxy.golang.org", action: "allow" }
+          ]
+        },
+        airgapped: {
+          tenant_id: "zero-egress",
+          default_egress: "deny",
+          block_metadata: true,
+          block_private_networks: true,
+          anti_spoofing: true,
+          allowed_resolvers: [],
+          cidr_rules: [],
+          dns_rules: []
+        }
+      };
+
+      function align2MiB(mb) {
+        if (mb <= 0) return 0;
+        if (mb < 64) return 64;
+        return Math.floor(mb / 2) * 2;
+      }
+
+      function renderVirtioFS() {
+        const mode = document.getElementById("vfs-mode").value;
+        const vms = Math.max(1, Math.min(64, parseInt(document.getElementById("vfs-vms").value || "8", 10)));
+        const layerMB = Math.max(16, parseInt(document.getElementById("vfs-layer").value || "128", 10));
+        const maxPoolMB = Math.max(64, parseInt(document.getElementById("vfs-pool-max").value || "2048", 10));
+        const guestMemMB = 512;
+
+        const privateMB = vms * layerMB;
+        let sharedMB = privateMB;
+        let winMB = 0;
+        let fallbacks = 0;
+        let cachePolicy = "never";
+        let allocatedDAX = 0;
+
+        if (mode !== "off") {
+          sharedMB = layerMB;
+          cachePolicy = mode === "dax" ? "always" : "auto";
+          winMB = align2MiB(Math.min(256, Math.floor(guestMemMB / 2)));
+          for (let i = 0; i < vms; i++) {
+            if (allocatedDAX + winMB <= maxPoolMB) {
+              allocatedDAX += winMB;
+            } else {
+              fallbacks++;
+            }
+          }
+        }
+
+        const savedMB = Math.max(0, privateMB - sharedMB);
+        const ratio = sharedMB > 0 ? (privateMB / sharedMB) : 1;
+        const sharedPct = privateMB > 0 ? Math.min(100, Math.max(4, (sharedMB / privateMB) * 100)) : 100;
+
+        document.getElementById("lbl-vfs-ram").textContent = privateMB + " MiB private -> " + sharedMB + " MiB shared (" + allocatedDAX + "/" + maxPoolMB + " MiB DAX)";
+        document.getElementById("bar-vfs-shared").style.width = sharedPct.toFixed(1) + "%";
+        document.getElementById("k-vfs-saved").textContent = savedMB + " MiB";
+        document.getElementById("k-vfs-ratio").textContent = ratio.toFixed(2) + "x";
+        document.getElementById("k-vfs-win").textContent = winMB + " MiB";
+        document.getElementById("k-vfs-fb").textContent = String(fallbacks);
+
+        const plan = {
+          mode: mode,
+          virtiofsd_args: [
+            "--socket-path=/var/run/omnivm/virtiofsd.sock",
+            "--shared-dir=/workspace",
+            "--cache=" + cachePolicy
+          ].concat(cachePolicy !== "never" ? ["--thread-pool-size=4"] : []),
+          ch_fs_config: Object.assign(
+            { tag: "workspace", socket: "/var/run/omnivm/virtiofsd.sock", num_queues: mode === "off" ? 1 : 2, queue_size: mode === "off" ? 512 : 1024 },
+            winMB > 0 && allocatedDAX > 0 ? { dax: true, cache_size: winMB * 1024 * 1024 } : {}
+          ),
+          ch_pmem_config: mode !== "off" ? { id: "rootfs-dax", file: "/var/lib/ovm/layers/sha256-base.raw", discard_writes: true } : null
+        };
+        document.getElementById("vfs-plan-json").textContent = JSON.stringify(plan, null, 2);
+      }
+
+      function parseNetPolicy() {
+        const raw = document.getElementById("np-policy-json").value;
+        return JSON.parse(raw);
+      }
+
+      function computeNetPolicyAudit(pol) {
+        const findings = [];
+        const cidrRules = Array.isArray(pol.cidr_rules) ? pol.cidr_rules : [];
+        const dnsRules = Array.isArray(pol.dns_rules) ? pol.dns_rules : [];
+        const resolvers = Array.isArray(pol.allowed_resolvers) ? pol.allowed_resolvers : [];
+
+        if (pol.default_egress === "allow") {
+          findings.push(Object.assign({ scope: "default_egress" }, netPolicyCatalog[0]));
+        }
+        cidrRules.forEach((r, idx) => {
+          if (r.action === "allow" && (r.cidr === "0.0.0.0/0" || r.cidr === "::/0") && (!r.ports || r.ports.length === 0 || !r.protocol || r.protocol === "any")) {
+            findings.push(Object.assign({ scope: "cidr_rules[" + idx + "]" }, netPolicyCatalog[0]));
+          }
+        });
+
+        if (!pol.block_metadata) {
+          findings.push(Object.assign({ scope: "block_metadata" }, netPolicyCatalog[1]));
+        }
+        cidrRules.forEach((r, idx) => {
+          if (r.action === "allow" && (String(r.cidr).startsWith("169.254.") || String(r.cidr).startsWith("100.100.100.200") || String(r.cidr).startsWith("fd00:ec2"))) {
+            findings.push(Object.assign({ scope: "cidr_rules[" + idx + "]" }, netPolicyCatalog[1]));
+          }
+        });
+
+        if (!pol.block_private_networks) {
+          findings.push(Object.assign({ scope: "block_private_networks" }, netPolicyCatalog[2]));
+        }
+        cidrRules.forEach((r, idx) => {
+          if (r.action === "allow" && /^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.)/.test(String(r.cidr)) && !String(r.cidr).endsWith("/32")) {
+            findings.push(Object.assign({ scope: "cidr_rules[" + idx + "]" }, netPolicyCatalog[2]));
+          }
+        });
+
+        if (!pol.anti_spoofing) {
+          findings.push(Object.assign({ scope: "anti_spoofing" }, netPolicyCatalog[3]));
+        }
+
+        const hasWildcardStar = dnsRules.some(d => d.action === "allow" && String(d.pattern).trim() === "*");
+        if (hasWildcardStar || ((pol.default_egress === "allow" || dnsRules.length > 0) && resolvers.length === 0)) {
+          findings.push(Object.assign({ scope: "dns_rules / allowed_resolvers" }, netPolicyCatalog[4]));
+        }
+
+        const riskyPorts = [22, 23, 25, 445, 2375, 3389, 6379, 6443, 10250];
+        cidrRules.forEach((r, idx) => {
+          if (r.action !== "allow" || !Array.isArray(r.ports)) return;
+          const prefixBits = parseInt((String(r.cidr).split("/")[1] || "32"), 10);
+          if (prefixBits <= 16) {
+            const hit = riskyPorts.some(p => r.ports.some(pr => p >= pr.from && p <= pr.to));
+            if (hit) findings.push(Object.assign({ scope: "cidr_rules[" + idx + "]" }, netPolicyCatalog[5]));
+          }
+        });
+
+        for (let j = 1; j < cidrRules.length; j++) {
+          for (let i = 0; i < j; i++) {
+            const early = cidrRules[i], late = cidrRules[j];
+            if (early.cidr === "0.0.0.0/0" && !(early.action === "allow" && pol.block_private_networks && /^(10\.|172\.|192\.168\.)/.test(String(late.cidr)))) {
+              const ePorts = early.ports || [];
+              const lPorts = late.ports || [];
+              const coversPorts = ePorts.length === 0 || (lPorts.length > 0 && lPorts.every(lp => ePorts.some(ep => ep.from <= lp.from && ep.to >= lp.to)));
+              if (coversPorts && (!early.protocol || early.protocol === "any" || early.protocol === late.protocol)) {
+                findings.push(Object.assign({ scope: "cidr_rules[" + j + "]" }, netPolicyCatalog[6]));
+                break;
+              }
+            }
+          }
+        }
+        for (let j = 1; j < dnsRules.length; j++) {
+          if (dnsRules.slice(0, j).some(d => d.pattern === "*" || d.pattern === dnsRules[j].pattern)) {
+            findings.push(Object.assign({ scope: "dns_rules[" + j + "]" }, netPolicyCatalog[6]));
+          }
+        }
+
+        dnsRules.forEach((d, idx) => {
+          if (d.action === "allow" && String(d.pattern).startsWith("*.")) {
+            const rest = String(d.pattern).slice(2);
+            if (rest && !rest.includes(".")) {
+              findings.push(Object.assign({ scope: "dns_rules[" + idx + "]" }, netPolicyCatalog[7]));
+            }
+          }
+        });
+
+        let score = 100;
+        findings.forEach(f => { score -= (f.severity === "error" ? 25 : 10); });
+        return { score: Math.max(0, score), findings: findings };
+      }
+
+      function compileNftablesJS(pol, tapName, guestIP) {
+        const tap = (tapName || "ovm0").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 15) || "ovm0";
+        const gip = (guestIP || "172.16.0.2").trim();
+        const tbl = "ovm_" + tap.replace(/[-.]/g, "_");
+        const lines = [
+          "# OmniVM per-VM egress policy ruleset (tenant=" + (pol.tenant_id || "default") + ", tap=" + tap + ", guest=" + gip + ")",
+          "table inet " + tbl,
+          "delete table inet " + tbl,
+          "",
+          "table inet " + tbl + " {",
+          "  chain forward_egress {",
+          "    type filter hook forward priority 0; policy accept;",
+          '    iifname != "' + tap + '" accept',
+          "    ct state established,related accept"
+        ];
+        if (pol.anti_spoofing) {
+          lines.push('    ip saddr != ' + gip + ' counter drop comment "anti-spoofing"');
+        }
+        const resolvers = (pol.allowed_resolvers || []).filter(Boolean);
+        if (resolvers.length > 0) {
+          const rset = resolvers.join(", ");
+          lines.push('    ip daddr { ' + rset + ' } udp dport 53 counter accept comment "pinned-dns-udp"');
+          lines.push('    ip daddr { ' + rset + ' } tcp dport 53 counter accept comment "pinned-dns-tcp"');
+          lines.push('    udp dport 53 counter drop comment "block-unpinned-dns-udp"');
+          lines.push('    tcp dport 53 counter drop comment "block-unpinned-dns-tcp"');
+        }
+        if (pol.block_metadata) {
+          lines.push('    ip daddr { 169.254.169.254, 169.254.170.2, 100.100.100.200 } counter drop comment "block-cloud-imds"');
+          lines.push('    ip6 daddr fd00:ec2::254 counter drop comment "block-cloud-imds6"');
+        }
+        let privPending = !!pol.block_private_networks;
+        (pol.cidr_rules || []).forEach(r => {
+          if (r.cidr === "0.0.0.0/0" && r.action === "allow" && privPending) {
+            lines.push('    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/16, 169.254.0.0/16, 127.0.0.0/8 } counter drop comment "block-private-lateral"');
+            lines.push('    ip6 daddr { fc00::/7, fe80::/10, ::1/128 } counter drop comment "block-private-lateral6"');
+            privPending = false;
+          }
+          const verdict = r.action === "allow" ? "accept" : "drop";
+          const addrMatch = r.cidr === "0.0.0.0/0" ? "meta nfproto ipv4" : ("ip daddr " + r.cidr);
+          let protoMatch = "";
+          if (r.protocol && r.protocol !== "any") {
+            if (r.ports && r.ports.length > 0) {
+              const pstr = r.ports.map(p => p.from === p.to ? String(p.from) : (p.from + "-" + p.to)).join(", ");
+              protoMatch = " " + r.protocol + " dport " + (r.ports.length > 1 ? "{ " + pstr + " }" : pstr);
+            } else {
+              protoMatch = " meta l4proto " + r.protocol;
+            }
+          }
+          lines.push("    " + addrMatch + protoMatch + " counter " + verdict);
+        });
+        if (privPending) {
+          lines.push('    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/16, 169.254.0.0/16, 127.0.0.0/8 } counter drop comment "block-private-lateral"');
+          lines.push('    ip6 daddr { fc00::/7, fe80::/10, ::1/128 } counter drop comment "block-private-lateral6"');
+        }
+        lines.push('    counter ' + (pol.default_egress === "allow" ? "accept" : "drop") + ' comment "default-egress"');
+        lines.push("  }");
+        lines.push("}");
+        return lines.join("\n");
+      }
+
+      function renderNetPolicyAudit() {
+        const view = document.getElementById("np-findings-view");
+        const badge = document.getElementById("np-badge-summary");
+        const nftOut = document.getElementById("np-nft-out");
+        view.innerHTML = "";
+
+        let pol;
+        try {
+          pol = parseNetPolicy();
+        } catch (e) {
+          badge.className = "badge-err";
+          badge.textContent = "Invalid JSON";
+          view.innerHTML = '<div class="sec-rule" style="color:#f87171">JSON Parse Error: ' + e.message + "</div>";
+          nftOut.textContent = "# Fix JSON syntax to compile nftables script";
+          return;
+        }
+
+        const rep = computeNetPolicyAudit(pol);
+        nftOut.textContent = compileNftablesJS(pol, document.getElementById("np-tap").value, document.getElementById("np-ip").value);
+
+        if (rep.findings.length === 0) {
+          badge.className = "badge-ok";
+          badge.textContent = "Score " + rep.score + "/100 (0 Findings)";
+          view.innerHTML = '<div class="sec-rule" style="color:#4ade80">PASS: Fail-closed egress policy passes OVM-NET-001..008 checks.</div>';
+        } else {
+          badge.className = rep.findings.some(f => f.severity === "error") ? "badge-err" : "badge-warn";
+          badge.textContent = "Score " + rep.score + "/100 (" + rep.findings.length + " Findings)";
+          rep.findings.forEach(f => {
+            const el = document.createElement("div");
+            el.className = "sec-rule";
+            el.innerHTML =
+              '<div class="sec-hdr">' +
+                '<span><span class="' + (f.severity === "error" ? "badge-err" : "badge-warn") + '">' + f.id + "</span> <strong>" + f.name + "</strong> (" + f.scope + ")</span>" +
+                '<span class="sec-cvss">CVSS ' + f.cvss + "</span>" +
+              "</div>" +
+              '<div class="sec-sum">' + f.summary + "</div>" +
+              '<div class="sec-rem">Fix: ' + f.remediation + "</div>";
+            view.appendChild(el);
+          });
+        }
+      }
+
+      function runNetPolicyProbes() {
+        const view = document.getElementById("np-findings-view");
+        let pol;
+        try {
+          pol = parseNetPolicy();
+        } catch (e) {
+          renderNetPolicyAudit();
+          return;
+        }
+        const gip = (document.getElementById("np-ip").value || "172.16.0.2").trim();
+        const probes = [
+          { label: "Cloud IMDS SSRF (169.254.169.254:80)", allowed: !pol.block_metadata && (pol.default_egress === "allow" || (pol.cidr_rules || []).some(r => r.action === "allow")), reason: pol.block_metadata ? "cloud_metadata_blocked" : "permitted_imds" },
+          { label: "Sibling VM SSH Lateral (172.16.0.6:22)", allowed: !pol.block_private_networks && (pol.default_egress === "allow" || (pol.cidr_rules || []).some(r => r.action === "allow")), reason: pol.block_private_networks ? "private_network_blocked" : "lateral_exposed" },
+          { label: "Spoofed Source IP (172.16.9.9 -> 1.1.1.1:443)", allowed: !pol.anti_spoofing, reason: pol.anti_spoofing ? "source_ip_spoof_blocked (expected " + gip + ")" : "spoof_unfiltered" },
+          { label: "Outbound HTTPS API (140.82.121.4:443)", allowed: pol.default_egress === "allow" || (pol.cidr_rules || []).some(r => r.action === "allow" && (!r.ports || r.ports.some(p => 443 >= p.from && 443 <= p.to))), reason: "cidr_or_default_verdict" },
+          { label: "Rogue DNS Nameserver (udp://8.8.4.4:53)", allowed: !(pol.allowed_resolvers && pol.allowed_resolvers.length > 0 && !pol.allowed_resolvers.includes("8.8.4.4")) && pol.default_egress === "allow", reason: (pol.allowed_resolvers && pol.allowed_resolvers.length > 0 && !pol.allowed_resolvers.includes("8.8.4.4")) ? "unpinned_dns_resolver_blocked" : "resolver_verdict" }
+        ];
+        view.innerHTML = "";
+        probes.forEach(p => {
+          const el = document.createElement("div");
+          el.className = "sec-rule";
+          el.innerHTML =
+            '<div class="sec-hdr">' +
+              "<span><strong>" + p.label + "</strong></span>" +
+              '<span class="' + (p.allowed ? "badge-warn" : "badge-ok") + '">' + (p.allowed ? "ALLOW" : "DENY") + "</span>" +
+            "</div>" +
+            '<div class="sec-rem">reason=' + p.reason + "</div>";
+          view.appendChild(el);
+        });
+        logEvent("ev-ok", "Evaluated 5 tenant egress firewall probes against policy " + (pol.tenant_id || "default"));
+      }
+
+      function exportNetPolicySarif() {
+        let pol = {};
+        let rep = { findings: [] };
+        try {
+          pol = parseNetPolicy();
+          rep = computeNetPolicyAudit(pol);
+        } catch (_) {}
+        const sarif = {
+          $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+          version: "2.1.0",
+          runs: [{
+            tool: {
+              driver: {
+                name: "omnivm-netpolicy-auditor",
+                version: "0.9.0",
+                informationUri: "https://github.com/SalyyS1/omnivm",
+                rules: netPolicyCatalog.map(r => ({
+                  id: r.id,
+                  name: r.name,
+                  shortDescription: { text: r.summary },
+                  defaultConfiguration: { level: r.severity },
+                  properties: { "security-severity": r.cvss }
+                }))
+              }
+            },
+            invocations: [{ executionSuccessful: true }],
+            results: rep.findings.map(f => ({
+              ruleId: f.id,
+              level: f.severity,
+              message: { text: f.summary + " Remediation: " + f.remediation },
+              locations: [{ physicalLocation: { artifactLocation: { uri: "netpolicy.json" }, region: { startLine: 1 } } }]
+            }))
+          }]
+        };
+        const blob = new Blob([JSON.stringify(sarif, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "omnivm-netpolicy-audit.sarif";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      ["vfs-mode", "vfs-vms", "vfs-layer", "vfs-pool-max"].forEach(id => {
+        const el = document.getElementById(id);
+        el.oninput = renderVirtioFS;
+        el.onchange = renderVirtioFS;
+      });
+      document.getElementById("btn-vfs-bench").onclick = () => {
+        renderVirtioFS();
+        logEvent("ev-cow", "Planned Virtio-FS/PMEM DAX pool mounts across " + document.getElementById("vfs-vms").value + " concurrent microVMs");
+      };
+      document.getElementById("btn-vfs-reset").onclick = () => {
+        document.getElementById("vfs-mode").value = "dax";
+        document.getElementById("vfs-vms").value = "8";
+        document.getElementById("vfs-layer").value = "128";
+        document.getElementById("vfs-pool-max").value = "2048";
+        renderVirtioFS();
+      };
+
+      document.getElementById("np-preset").onchange = (e) => {
+        const p = netPolicyPresets[e.target.value];
+        if (p) {
+          document.getElementById("np-policy-json").value = JSON.stringify(p, null, 2);
+          renderNetPolicyAudit();
+        }
+      };
+      document.getElementById("np-tap").oninput = renderNetPolicyAudit;
+      document.getElementById("np-ip").oninput = renderNetPolicyAudit;
+      document.getElementById("btn-np-audit").onclick = renderNetPolicyAudit;
+      document.getElementById("btn-np-probes").onclick = runNetPolicyProbes;
+      document.getElementById("btn-np-sarif").onclick = exportNetPolicySarif;
+
+      document.getElementById("np-policy-json").value = JSON.stringify(netPolicyPresets.vulnerable, null, 2);
+      renderVirtioFS();
+      renderNetPolicyAudit();
 
       logEvent("ev-ok", "Simulator ready: click Simulate CoW Snapshot + 3x Branch + KSM Dedup or test per-VM controls");
       render();

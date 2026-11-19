@@ -9,7 +9,7 @@ Hardware-isolated, scale-to-zero Linux microVMs for AI sandboxes, ephemeral tool
 
 OmniVM runs each workload inside a dedicated [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM backed by Linux KVM and its own guest kernel. Any standard OCI container image (`python:3.12-alpine`, `node:22-alpine`, `ubuntu:24.04`, or custom registries) is unpacked and formatted into an isolated `ext4` root block device. Idle microVMs automatically freeze vCPUs (`PAUSED`) and later scale down to zero host memory (`STOPPED`), while keeping host ingress ports bound so the next HTTP request, TCP connection, `exec` call, or agent tether frame transparently wakes the instance.
 
-> **Status: pre-alpha.** OmniVM builds upon [AegisVM](https://github.com/xfeldman/aegisvm) and is actively hardened toward multi-tenant Linux deployments. Host-level multi-tenant network isolation (`nftables` anti-spoofing), cgroup v2 quotas, and unprivileged VMM sandboxing are tracked on the [roadmap](#roadmap); do not expose untrusted multi-tenant workloads on shared production hosts without additional host isolation. Benchmark claims are published together with reproducible scripts in [docs/benchmarks.md](docs/benchmarks.md).
+> **Status: pre-alpha.** OmniVM builds upon [AegisVM](https://github.com/xfeldman/aegisvm) and is actively hardened toward multi-tenant Linux deployments. Unprivileged VMM jail sandboxing and daemonless VM re-attachment are tracked on the [roadmap](#roadmap); review your host isolation posture before exposing untrusted multi-tenant workloads on shared production hosts. Benchmark claims are published together with reproducible scripts in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Architecture
 
@@ -239,6 +239,11 @@ Example `GET /v1/metrics` response:
 
 Key REST endpoints:
 
+- `GET /v1/virtiofs` / `PUT /v1/virtiofs/mode` - Shared Virtio-FS and Virtio-PMEM DAX rootfs cache pool status and operating mode (`off`, `auto`, `dax`)
+- `POST /v1/virtiofs/layers` / `DELETE /v1/virtiofs/layers/{digest}` / `POST /v1/virtiofs/plan` / `POST /v1/virtiofs/bench` - Content-addressed shared base layer registration, 2 MiB DAX window mount planner, and fleet page-cache benchmark
+- `GET /v1/netpolicy` / `PUT /v1/netpolicy/mode` - Per-tenant microVM egress CIDR/DNS firewall status and mode (`off`, `audit`, `enforce`)
+- `PUT /v1/netpolicy/tenants/{tenant}` / `GET /v1/netpolicy/tenants/{tenant}` / `DELETE /v1/netpolicy/tenants/{tenant}` - Per-tenant outbound firewall policy CRUD
+- `POST /v1/netpolicy/evaluate` / `POST /v1/netpolicy/audit` / `POST /v1/netpolicy/compile` / `GET /v1/netpolicy/baseline` - Packet/DNS policy simulation, `OVM-NET-001..008` static security audit (JSON or SARIF v2.1.0), atomic `nftables` compiler, and hardened sandbox presets
 - `GET /v1/qos` / `POST /v1/qos/mode` - Multi-tenant token-bucket I/O QoS governor status and mode
 - `PUT /v1/qos/tenants/{tenant}` / `DELETE /v1/qos/tenants/{tenant}` - Tenant virtio-blk and virtio-net rate ceiling configuration
 - `POST /v1/qos/bench` - Run synthetic multi-tenant I/O QoS noisy-neighbor benchmark
@@ -278,6 +283,26 @@ ovm bench ioqos --tenants 3 --noisy-vms 4 --duration-ms 2000
 ovm seccomp audit profile.json --target vmm --sarif seccomp.sarif
 ovm seccomp rules
 ovm seccomp generate --target vmm --out hardened-vmm-seccomp.json
+```
+
+## Shared Virtio-FS / Virtio-PMEM DAX Pool and Per-Tenant Egress Policy Firewall (`v0.9.0`)
+
+OmniVM `v0.9.0` eliminates duplicate guest page-cache footprints across shared container layers and enforces fail-closed per-tenant outbound network isolation:
+
+- **Shared Virtio-FS and Virtio-PMEM DAX Cache Pool (`internal/virtiofs`)**: Content-addressed read-only base layer registry (`sha256:<digest>`) with reference-counted pinning (`ActiveRefs`) and unpinned LRU eviction under `OVM_VIRTIOFS_CACHE_MB`. Plans 2 MiB-aligned `virtio-fs` DAX windows (`FsConfig.dax=true`, `cache_size`) bounded by a host-wide DAX virtual address ceiling (`OVM_VIRTIOFS_MAX_POOL_MB`), attaches direct-mapped read-only base images via Cloud Hypervisor `virtio-pmem` (`discard_writes=true`), and scales `virtiofsd` multi-queue worker pools (`OVM_VIRTIOFS_POOL=off|auto|dax`).
+- **Per-Tenant Egress CIDR/DNS Policy Firewall and `nftables` Compiler (`internal/netpolicy`)**: Evaluates outbound L3/L4 packets and L7 DNS queries against per-tenant policies (`OVM_NETPOLICY_MODE=off|audit|enforce`), blocking cloud instance metadata SSRF (`169.254.169.254`, `169.254.170.2`, `100.100.100.200`, `fd00:ec2::254`), RFC1918 and `/30` tap cross-VM lateral movement, spoofed guest source IPs, and unpinned DNS resolvers. Compiles validated tenant policies into atomic, idempotent Linux `nftables` `inet` rulesets (`table inet ovm_<tap>`) and statically audits policy JSON files against 8 security rules (`OVM-NET-001` through `OVM-NET-008`) with CVSS v3.1 ratings and OASIS SARIF v2.1.0 output. Exposed to LLM agents via `ovm-mcp` (`netpolicy_audit`, `netpolicy_compile`, `virtiofs_status`, 22 MCP tools total).
+
+```bash
+# Inspect and benchmark the shared Virtio-FS / Virtio-PMEM DAX cache pool
+ovm virtiofs status
+ovm virtiofs plan --memory-mb 512 --vcpus 4 --mode dax --pmem-file /var/lib/ovm/alpine.raw --json
+ovm bench virtiofs --vms 8 --layer-mb 64
+
+# Generate, audit (SARIF v2.1.0), compile to nftables, and simulate per-tenant egress policies
+ovm netpolicy generate --tenant acme --preset strict-ai-sandbox --out policy.json
+ovm netpolicy audit policy.json --sarif netpolicy.sarif --strict
+ovm netpolicy compile policy.json --tap ovm0 --guest-ip 172.16.0.2
+ovm netpolicy eval policy.json --dst 169.254.169.254 --proto tcp --port 80
 ```
 
 ## Testing

@@ -115,12 +115,27 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /metrics", s.handlePrometheusMetrics)
 	s.mux.HandleFunc("POST /v1/bench/prefault", s.handleBenchPrefault)
 	s.mux.HandleFunc("POST /v1/bench/ioqos", s.handleBenchIOQoS)
+	s.mux.HandleFunc("POST /v1/bench/virtiofs", s.handleBenchVirtioFS)
 	s.mux.HandleFunc("GET /v1/qos", s.handleGetQoS)
 	s.mux.HandleFunc("PUT /v1/qos/mode", s.handleSetQoSMode)
 	s.mux.HandleFunc("PUT /v1/qos/tenants/{tenant}", s.handleSetTenantQoS)
 	s.mux.HandleFunc("DELETE /v1/qos/tenants/{tenant}", s.handleDeleteTenantQoS)
 	s.mux.HandleFunc("POST /v1/seccomp/audit", s.handleSeccompAudit)
 	s.mux.HandleFunc("GET /v1/seccomp/baseline", s.handleSeccompBaseline)
+	s.mux.HandleFunc("GET /v1/virtiofs", s.handleGetVirtioFS)
+	s.mux.HandleFunc("PUT /v1/virtiofs/mode", s.handleSetVirtioFSMode)
+	s.mux.HandleFunc("POST /v1/virtiofs/layers", s.handleRegisterVirtioFSLayer)
+	s.mux.HandleFunc("DELETE /v1/virtiofs/layers/{digest}", s.handleDeleteVirtioFSLayer)
+	s.mux.HandleFunc("POST /v1/virtiofs/plan", s.handlePlanVirtioFSMount)
+	s.mux.HandleFunc("GET /v1/netpolicy", s.handleGetNetPolicy)
+	s.mux.HandleFunc("PUT /v1/netpolicy/mode", s.handleSetNetPolicyMode)
+	s.mux.HandleFunc("PUT /v1/netpolicy/tenants/{tenant}", s.handleSetTenantNetPolicy)
+	s.mux.HandleFunc("GET /v1/netpolicy/tenants/{tenant}", s.handleGetTenantNetPolicy)
+	s.mux.HandleFunc("DELETE /v1/netpolicy/tenants/{tenant}", s.handleDeleteTenantNetPolicy)
+	s.mux.HandleFunc("POST /v1/netpolicy/evaluate", s.handleEvaluateNetPolicy)
+	s.mux.HandleFunc("POST /v1/netpolicy/audit", s.handleNetPolicyAudit)
+	s.mux.HandleFunc("POST /v1/netpolicy/compile", s.handleNetPolicyCompile)
+	s.mux.HandleFunc("GET /v1/netpolicy/baseline", s.handleNetPolicyBaseline)
 }
 
 // Start begins listening on the unix socket.
@@ -225,6 +240,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"warm_pool_prefault":    true,
 			"io_qos_governor":       true,
 			"seccomp_auditor":       true,
+			"virtiofs_dax_pool":     true,
+			"netpolicy_firewall":    true,
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,

@@ -72,6 +72,10 @@ func main() {
 		cmdQoS()
 	case "seccomp":
 		cmdSeccomp()
+	case "virtiofs":
+		cmdVirtioFS()
+	case "netpolicy":
+		cmdNetPolicy()
 	case "doctor":
 		cmdDoctor()
 	case "instance":
@@ -106,9 +110,11 @@ Commands:
   run        Run a command in an ephemeral microVM (start + follow + delete)
   status     Show daemon status
   metrics    Export daemon telemetry (--prometheus or --json)
-  bench      Run host microVM subsystem benchmarks (prefault, ioqos)
+  bench      Run host microVM subsystem benchmarks (prefault, ioqos, virtiofs)
   qos        Manage multi-tenant virtio-blk and virtio-net I/O QoS policies
   seccomp    Audit or generate Linux seccomp-bpf syscall profiles (--sarif supported)
+  virtiofs   Manage shared Virtio-FS / Virtio-PMEM DAX rootfs cache pool
+  netpolicy  Audit, compile (nftables), or enforce per-tenant egress CIDR/DNS policies
   doctor     Print platform and backend info
   instance   Manage instances (start, branch, list, info, disable, delete, pause, resume, prune)
   snapshot   Manage Copy-on-Write microVM snapshots and branches (create, list, info, branch, delete)

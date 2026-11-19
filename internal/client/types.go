@@ -214,6 +214,38 @@ type IOQoSMetrics struct {
 	RebalancePasses      uint64  `json:"rebalance_passes"`
 }
 
+// VirtioFSMetrics reports shared Virtio-FS and Virtio-PMEM DAX pool counters.
+type VirtioFSMetrics struct {
+	Mode               string `json:"mode"`
+	ActiveLayers       int    `json:"active_layers"`
+	PinnedLayers       int    `json:"pinned_layers"`
+	CachedBytes        uint64 `json:"cached_bytes"`
+	MaxCacheBytes      uint64 `json:"max_cache_bytes"`
+	CacheHits          uint64 `json:"cache_hits"`
+	CacheMisses        uint64 `json:"cache_misses"`
+	LayerEvictions     uint64 `json:"layer_evictions"`
+	DedupSavedBytes    uint64 `json:"dedup_saved_bytes"`
+	ActiveDAXMounts    int    `json:"active_dax_mounts"`
+	AllocatedDAXBytes  uint64 `json:"allocated_dax_bytes"`
+	MaxPoolBytes       uint64 `json:"max_pool_bytes"`
+	DAXAllocations     uint64 `json:"dax_allocations"`
+	DAXBudgetFallbacks uint64 `json:"dax_budget_fallbacks"`
+}
+
+// NetPolicyMetrics reports per-tenant egress CIDR/DNS firewall counters.
+type NetPolicyMetrics struct {
+	Mode              string `json:"mode"`
+	ActivePolicies    int    `json:"active_policies"`
+	AllowedPackets    uint64 `json:"allowed_packets"`
+	DeniedPackets     uint64 `json:"denied_packets"`
+	IMDSBlocks        uint64 `json:"imds_blocks"`
+	LateralBlocks     uint64 `json:"lateral_blocks"`
+	SpoofBlocks       uint64 `json:"spoof_blocks"`
+	AllowedDNSQueries uint64 `json:"allowed_dns_queries"`
+	DeniedDNSQueries  uint64 `json:"denied_dns_queries"`
+	CompiledRulesets  uint64 `json:"compiled_rulesets"`
+}
+
 // LifecycleMetrics holds scale-to-zero lifecycle counters.
 type LifecycleMetrics struct {
 	ColdStarts        uint64             `json:"cold_starts"`
@@ -232,6 +264,8 @@ type LifecycleMetrics struct {
 	ActiveConnections int                `json:"active_connections"`
 	DiskPrewarm       DiskPrewarmMetrics `json:"disk_prewarm"`
 	IOQoS             IOQoSMetrics       `json:"io_qos"`
+	VirtioFS          VirtioFSMetrics    `json:"virtiofs"`
+	NetPolicy         NetPolicyMetrics   `json:"net_policy"`
 	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 

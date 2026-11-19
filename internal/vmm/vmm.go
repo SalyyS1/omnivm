@@ -87,6 +87,23 @@ type VMConfig struct {
 	// NetRateLimiter holds an optional Cloud Hypervisor RateLimiterConfig map
 	// applied to the guest virtio-net tap interface.
 	NetRateLimiter map[string]interface{}
+
+	// VirtioFS configures optional multi-queue, cache policy, and 2 MiB-aligned
+	// DAX window settings when WorkspacePath is mounted via virtiofsd.
+	VirtioFS *VirtioFSOptions
+
+	// PmemRootfsPath optionally attaches a direct-mapped read-only shared base
+	// layer via Cloud Hypervisor virtio-pmem (discard_writes=true).
+	PmemRootfsPath string
+}
+
+// VirtioFSOptions holds optional per-VM virtiofsd and Cloud Hypervisor FsConfig parameters.
+type VirtioFSOptions struct {
+	CachePolicy    string
+	ThreadPoolSize int
+	NumQueues      int
+	QueueSize      int
+	DAXWindowBytes uint64
 }
 
 // Snapshotter is an optional extension implemented by VMM backends that support

@@ -102,3 +102,30 @@ func TestBuildCHDiskAndNetPayloads_RateLimiterConfig(t *testing.T) {
 		t.Fatalf("expected rate_limiter_config on QoS net payload")
 	}
 }
+
+func TestBuildCHVirtioFSAndArgs_DAXAndDefault(t *testing.T) {
+	defFs := buildCHVirtioFSPayload("workspace", "/tmp/vfs.sock", nil)
+	if _, hasDAX := defFs["dax"]; hasDAX {
+		t.Fatalf("default FsConfig must omit dax: %+v", defFs)
+	}
+	defArgs := buildVirtiofsdArgs("/tmp/vfs.sock", "/tmp/ws", nil)
+	if len(defArgs) != 3 || defArgs[2] != "--cache=never" {
+		t.Fatalf("unexpected default virtiofsd args: %v", defArgs)
+	}
+
+	daxOpts := &VirtioFSOptions{
+		CachePolicy:    "always",
+		ThreadPoolSize: 4,
+		NumQueues:      2,
+		QueueSize:      1024,
+		DAXWindowBytes: 128 * 1024 * 1024,
+	}
+	daxFs := buildCHVirtioFSPayload("workspace", "/tmp/vfs.sock", daxOpts)
+	if daxFs["dax"] != true || daxFs["cache_size"] != uint64(128*1024*1024) || daxFs["num_queues"] != 2 {
+		t.Fatalf("unexpected DAX FsConfig: %+v", daxFs)
+	}
+	daxArgs := buildVirtiofsdArgs("/tmp/vfs.sock", "/tmp/ws", daxOpts)
+	if len(daxArgs) != 4 || daxArgs[2] != "--cache=always" || daxArgs[3] != "--thread-pool-size=4" {
+		t.Fatalf("unexpected DAX virtiofsd args: %v", daxArgs)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/SalyyS1/omnivm/internal/config"
+	"github.com/SalyyS1/omnivm/internal/virtiofs"
 )
 
 // CloudHypervisorVMM implements the VMM interface using Cloud Hypervisor on Linux.
@@ -324,12 +325,12 @@ func (v *CloudHypervisorVMM) freshBoot(client *chClient, inst *chInstance, cfg V
 	// Add virtiofs if workspace configured
 	if cfg.WorkspacePath != "" {
 		createPayload["fs"] = []map[string]interface{}{
-			{
-				"tag":        "workspace",
-				"socket":     inst.virtiofsdSocket,
-				"num_queues": 1,
-				"queue_size": 512,
-			},
+			buildCHVirtioFSPayload("workspace", inst.virtiofsdSocket, cfg.VirtioFS),
+		}
+	}
+	if cfg.PmemRootfsPath != "" {
+		createPayload["pmem"] = []map[string]interface{}{
+			virtiofs.BuildCHPmemPayload("rootfs-dax", cfg.PmemRootfsPath, true),
 		}
 	}
 
@@ -450,6 +451,20 @@ func buildCHNetPayload(tapName string, rateLimiter map[string]interface{}) map[s
 		netCfg["rate_limiter_config"] = rateLimiter
 	}
 	return netCfg
+}
+
+func buildCHVirtioFSPayload(tag, socketPath string, opts *VirtioFSOptions) map[string]interface{} {
+	if opts == nil {
+		return virtiofs.BuildCHFsPayload(tag, socketPath, 1, 512, 0)
+	}
+	return virtiofs.BuildCHFsPayload(tag, socketPath, opts.NumQueues, opts.QueueSize, opts.DAXWindowBytes)
+}
+
+func buildVirtiofsdArgs(socketPath, sharedDir string, opts *VirtioFSOptions) []string {
+	if opts == nil {
+		return virtiofs.BuildVirtiofsdArgs(socketPath, sharedDir, "never", 0)
+	}
+	return virtiofs.BuildVirtiofsdArgs(socketPath, sharedDir, opts.CachePolicy, opts.ThreadPoolSize)
 }
 
 // SnapshotVM captures paused Cloud Hypervisor state into destDir via PUT /api/v1/vm.snapshot.
@@ -573,11 +588,8 @@ func (v *CloudHypervisorVMM) Capabilities() BackendCaps {
 func (v *CloudHypervisorVMM) startVirtiofsd(inst *chInstance) error {
 	os.Remove(inst.virtiofsdSocket) // clean stale
 
-	cmd := exec.Command(v.virtiofsdBin,
-		"--socket-path="+inst.virtiofsdSocket,
-		"--shared-dir="+inst.config.WorkspacePath,
-		"--cache=never",
-	)
+	args := buildVirtiofsdArgs(inst.virtiofsdSocket, inst.config.WorkspacePath, inst.config.VirtioFS)
+	cmd := exec.Command(v.virtiofsdBin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
