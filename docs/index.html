@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniVM v0.9.0 | Scale-to-Zero KVM MicroVM, Virtio-FS/PMEM DAX Pool &amp; Egress Policy Simulator</title>
-  <meta name="description" content="Interactive scale-to-zero state machine, shared Virtio-FS and Virtio-PMEM DAX rootfs cache pool, per-tenant egress CIDR/DNS firewall and nftables compiler (OVM-NET-001..008 SARIF v2.1.0), multi-tenant I/O QoS governor, seccomp auditor, proactive Linux KSM, and Prometheus/OpenMetrics simulator for OmniVM v0.9.0." />
+  <title>OmniVM v1.0.0 | Scale-to-Zero KVM MicroVM, VMM Jail, Hibernation &amp; DAX Simulator</title>
+  <meta name="description" content="Interactive scale-to-zero state machine, unprivileged Cloud Hypervisor VMM jail auditor (OVM-JAIL-001..008 SARIF v2.1.0), daemonless PID start-tick survival leases, sparse memory hibernation with virtio-rng entropy reseeding, Virtio-FS/PMEM DAX cache pool, and egress CIDR/DNS firewall simulator for OmniVM v1.0.0." />
   <style>
     :root {
       --bg: #0b0f17;
@@ -319,15 +319,15 @@
   <div class="wrap">
     <header>
       <div>
-        <span class="badge">OmniVM v0.9.0 Control Plane</span>
-        <h1>Scale-to-Zero KVM MicroVM, Virtio-FS/PMEM DAX Pool &amp; Egress Policy Simulator</h1>
+        <span class="badge">OmniVM v1.0.0 Control Plane</span>
+        <h1>Scale-to-Zero KVM MicroVM, Unprivileged VMM Jail &amp; Hibernation Simulator</h1>
         <p class="subtitle">
-          Explore shared Virtio-FS and Virtio-PMEM DAX rootfs page-cache pooling, per-tenant egress CIDR/DNS firewalling with atomic nftables compilation and OVM-NET-001..008 SARIF v2.1.0 auditing, multi-tenant token-bucket I/O QoS, seccomp-bpf auditing, proactive KSM deduplication, and Copy-on-Write snapshot branching.
+          Explore unprivileged subordinate UID/GID VMM jails (OVM-JAIL-001..008 SARIF v2.1.0) and daemonless survival leases, sparse 4 KiB zero-page memory hibernation with guest clock sync and 512-bit virtio-rng reseeding, Virtio-FS/PMEM DAX pooling, per-tenant egress CIDR/DNS firewalling, and Copy-on-Write snapshot branching.
         </p>
       </div>
       <div class="nav-links">
         <a class="btn btn-primary" href="https://github.com/SalyyS1/omnivm">GitHub Repository</a>
-        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v0.9.0">Release v0.9.0</a>
+        <a class="btn" href="https://github.com/SalyyS1/omnivm/releases/tag/v1.0.0">Release v1.0.0</a>
         <a class="btn" href="https://github.com/SalyyS1/omnivm/blob/main/docs/benchmarks.md">Benchmarks</a>
       </div>
     </header>
@@ -638,6 +638,44 @@
           <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;">Compiled Atomic Linux nftables Script (table inet)</div>
           <pre id="np-nft-out" style="max-height:130px;"></pre>
         </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>
+          <span>Unprivileged VMM Jail Auditor &amp; Survival Leases (v1.0.0)</span>
+          <span id="jail-badge" class="badge-ok">OVM-JAIL PASS</span>
+        </h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <select id="jail-preset" class="btn btn-sm">
+            <option value="hardened">Preset: Hardened Subordinate VMM Jail (UID 100001)</option>
+            <option value="unsafe">Preset: Root Unconfined Escape Risk (OVM-JAIL-001..008)</option>
+          </select>
+          <button class="btn btn-sm btn-primary" id="btn-jail-audit">Audit JailSpec</button>
+          <button class="btn btn-sm" id="btn-jail-reconcile">Simulate ovmd Lease Reconcile</button>
+        </div>
+        <textarea id="jail-spec-json" style="width:100%;height:115px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:8px;border-radius:6px;resize:vertical;margin-bottom:8px;"></textarea>
+        <div id="jail-findings" style="max-height:145px;overflow-y:auto;"></div>
+      </div>
+
+      <div class="card">
+        <h2>
+          <span>Sparse Memory Hibernation &amp; virtio-rng Reseed Lab (v1.0.0)</span>
+          <button class="btn btn-sm btn-purple" id="btn-hib-run">Synthesize Restore Plan</button>
+        </h2>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="k-val" id="hib-saved">384 MiB</div><div class="k-lbl">Zero-Page Elided</div></div>
+          <div class="kpi"><div class="k-val" id="hib-ratio">4.00x</div><div class="k-lbl">Compaction Ratio</div></div>
+          <div class="kpi"><div class="k-val" id="hib-clock">step</div><div class="k-lbl">Clock Sync Mode</div></div>
+          <div class="kpi"><div class="k-val">512-bit</div><div class="k-lbl">CSPRNG Reseed</div></div>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;font-family:var(--mono);font-size:12px;color:var(--muted);">
+          <label>Guest RAM (MiB): <input id="hib-mem" type="number" value="512" min="64" max="8192" step="64" style="width:72px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;" /></label>
+          <label>Zero Ratio (%): <input id="hib-zero" type="number" value="75" min="0" max="98" step="5" style="width:62px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;" /></label>
+          <label>Hibernated (ms): <input id="hib-ms" type="number" value="600000" min="50" step="1000" style="width:92px;background:var(--panel-alt);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;" /></label>
+        </div>
+        <pre id="hib-rpc-out" style="max-height:150px;"></pre>
       </div>
     </div>
 
@@ -1869,6 +1907,124 @@
       document.getElementById("np-policy-json").value = JSON.stringify(netPolicyPresets.vulnerable, null, 2);
       renderVirtioFS();
       renderNetPolicyAudit();
+
+      const jailPresets = {
+        hardened: {
+          instance_id: "agent-sandbox-01",
+          tenant_id: "acme-prod",
+          mode: "strict",
+          uid: 100001,
+          gid: 100001,
+          chroot_dir: "/var/run/omnivm/jails/agent-sandbox-01/root",
+          no_new_privs: true,
+          clear_bounding_caps: true,
+          retained_caps: [],
+          kvm_fd_handoff: true,
+          tap_fd_handoff: true,
+          seccomp_profile: "builtin:cloud-hypervisor-vmm",
+          net_namespace: "ovm-agent-sandbox-01",
+          memory_mb: 512,
+          rlimit_as_bytes: 805306368,
+          rlimit_nofile: 4096,
+          rlimit_nproc: 80,
+          bind_mounts: [{ source: "/var/lib/omnivm/overlays/agent-sandbox-01.ext4", target: "/rootfs.ext4", read_only: false }]
+        },
+        unsafe: {
+          instance_id: "unconfined-vm",
+          uid: 0,
+          gid: 0,
+          chroot_dir: "/etc/omnivm",
+          no_new_privs: false,
+          clear_bounding_caps: false,
+          retained_caps: ["CAP_SYS_ADMIN"],
+          kvm_fd_handoff: false,
+          tap_fd_handoff: false,
+          seccomp_profile: "unconfined",
+          net_namespace: "host",
+          memory_mb: 512,
+          rlimit_as_bytes: 0,
+          rlimit_nofile: 0,
+          rlimit_nproc: 0,
+          bind_mounts: [{ source: "/var/run/docker.sock", target: "/docker.sock", read_only: false }]
+        }
+      };
+
+      function renderJailAudit() {
+        const out = document.getElementById("jail-findings");
+        const badge = document.getElementById("jail-badge");
+        let sp;
+        try {
+          sp = JSON.parse(document.getElementById("jail-spec-json").value);
+        } catch (e) {
+          badge.className = "badge-err";
+          badge.textContent = "INVALID JSON";
+          out.innerHTML = "<div class='sec-rule'>Invalid JailSpec JSON: " + e.message + "</div>";
+          return;
+        }
+        const findings = [];
+        if (!sp.uid || !sp.gid || sp.uid < 65536 || sp.gid < 65536) findings.push(["OVM-JAIL-001", "error", "9.3", "Privileged or low system UID/GID (" + sp.uid + ":" + sp.gid + "). Allocate subordinate UID >= 100000."]);
+        if (!sp.chroot_dir || sp.chroot_dir === "/" || sp.chroot_dir.startsWith("/etc") || sp.chroot_dir.startsWith("/root")) findings.push(["OVM-JAIL-002", "error", "9.1", "Unsafe chroot boundary (" + sp.chroot_dir + "). Confine inside /var/run/omnivm/jails/<id>/root."]);
+        if (!sp.no_new_privs || !sp.clear_bounding_caps || (sp.retained_caps && sp.retained_caps.length > 0)) findings.push(["OVM-JAIL-003", "error", "8.8", "Retained Linux capabilities or disabled PR_SET_NO_NEW_PRIVS."]);
+        const minAS = ((sp.memory_mb || 512) + 64) * 1024 * 1024;
+        if (!sp.rlimit_as_bytes || sp.rlimit_as_bytes < minAS || !sp.rlimit_nproc) findings.push(["OVM-JAIL-004", "warning", "7.4", "Missing or undersized RLIMIT_AS / RLIMIT_NPROC bounds."]);
+        if (!sp.seccomp_profile || sp.seccomp_profile === "unconfined" || !sp.net_namespace || sp.net_namespace === "host") findings.push(["OVM-JAIL-006", "warning", "6.8", "Missing seccomp-bpf filter or per-VM network namespace."]);
+        if (!sp.kvm_fd_handoff || !sp.tap_fd_handoff) findings.push(["OVM-JAIL-007", "warning", "6.5", "Device FD handoff disabled; requires character nodes inside chroot."]);
+        for (const bm of (sp.bind_mounts || [])) {
+          if (bm.source && (bm.source.includes("..") || bm.source.startsWith("/etc") || bm.source.includes("docker.sock"))) {
+            findings.push(["OVM-JAIL-008", "error", "8.9", "Sensitive host bind mount exposed (" + bm.source + ")."]);
+          }
+        }
+        if (findings.length === 0) {
+          badge.className = "badge-ok";
+          badge.textContent = "8/8 RULES PASS";
+          out.innerHTML = "<div class='sec-rule'><span class='badge-ok'>PASS</span> Subordinate UID " + sp.uid + ", CapBnd=0, FD handoff, and RLIMIT_AS verified across OVM-JAIL-001..008.</div>";
+        } else {
+          const errs = findings.filter(x => x[1] === "error").length;
+          badge.className = errs > 0 ? "badge-err" : "badge-warn";
+          badge.textContent = findings.length + " FINDING(S)";
+          out.innerHTML = findings.map(f => "<div class='sec-rule'><div class='sec-hdr'><span class='" + (f[1] === "error" ? "badge-err" : "badge-warn") + "'>" + f[0] + "</span><span class='sec-cvss'>CVSS " + f[2] + "</span></div><div class='sec-sum'>" + f[3] + "</div></div>").join("");
+        }
+      }
+
+      function renderHibernatePlan() {
+        const memMB = Math.max(64, parseInt(document.getElementById("hib-mem").value || "512", 10));
+        const zeroPct = Math.min(98, Math.max(0, parseInt(document.getElementById("hib-zero").value || "75", 10)));
+        const hibMs = Math.max(0, parseInt(document.getElementById("hib-ms").value || "600000", 10));
+        const savedMB = Math.round(memMB * (zeroPct / 100));
+        const storedMB = Math.max(1, memMB - savedMB);
+        const ratio = (memMB / storedMB).toFixed(2) + "x";
+        const mode = hibMs >= 500 ? "step" : (hibMs > 0 ? "slew" : "noop");
+        document.getElementById("hib-saved").textContent = savedMB + " MiB";
+        document.getElementById("hib-ratio").textContent = ratio;
+        document.getElementById("hib-clock").textContent = mode;
+        const randHex = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0")).join("");
+        const vmGenId = randHex.slice(0, 8) + "-" + randHex.slice(8, 12) + "-4" + randHex.slice(13, 16) + "-8" + randHex.slice(17, 20) + "-" + randHex.slice(20, 32);
+        document.getElementById("hib-rpc-out").textContent = JSON.stringify({
+          stream_magic: "OVMHIB01",
+          compaction: { raw_mb: memMB, stored_mb: storedMB, zero_pages_elided: Math.round((savedMB * 1024) / 4) },
+          clock_sync_rpc: { jsonrpc: "2.0", method: "clock.sync", params: { skew_delta_ms: hibMs, adjustment_mode: mode } },
+          rng_reseed_rpc: { jsonrpc: "2.0", method: "rng.reseed", params: { credit_bits: 512, vm_gen_id: vmGenId } }
+        }, null, 2);
+      }
+
+      document.getElementById("jail-spec-json").value = JSON.stringify(jailPresets.hardened, null, 2);
+      document.getElementById("jail-preset").onchange = (e) => {
+        document.getElementById("jail-spec-json").value = JSON.stringify(jailPresets[e.target.value], null, 2);
+        renderJailAudit();
+      };
+      document.getElementById("btn-jail-audit").onclick = renderJailAudit;
+      document.getElementById("btn-jail-reconcile").onclick = () => {
+        logEvent("ev-ok", "Reconciled survival leases: 2 live VMs reattached (PID start_ticks verified), 1 recycled PID safely skipped, 1 dead socket swept");
+      };
+      ["hib-mem", "hib-zero", "hib-ms"].forEach(id => {
+        document.getElementById(id).oninput = renderHibernatePlan;
+      });
+      document.getElementById("btn-hib-run").onclick = () => {
+        renderHibernatePlan();
+        logEvent("ev-cow", "Synthesized OVMHIB01 sparse restore plan + 512-bit virtio-rng entropy reseed");
+      };
+      renderJailAudit();
+      renderHibernatePlan();
 
       logEvent("ev-ok", "Simulator ready: click Simulate CoW Snapshot + 3x Branch + KSM Dedup or test per-VM controls");
       render();

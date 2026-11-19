@@ -116,6 +116,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/bench/prefault", s.handleBenchPrefault)
 	s.mux.HandleFunc("POST /v1/bench/ioqos", s.handleBenchIOQoS)
 	s.mux.HandleFunc("POST /v1/bench/virtiofs", s.handleBenchVirtioFS)
+	s.mux.HandleFunc("POST /v1/bench/hibernate", s.handleBenchHibernate)
 	s.mux.HandleFunc("GET /v1/qos", s.handleGetQoS)
 	s.mux.HandleFunc("PUT /v1/qos/mode", s.handleSetQoSMode)
 	s.mux.HandleFunc("PUT /v1/qos/tenants/{tenant}", s.handleSetTenantQoS)
@@ -136,6 +137,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /v1/netpolicy/audit", s.handleNetPolicyAudit)
 	s.mux.HandleFunc("POST /v1/netpolicy/compile", s.handleNetPolicyCompile)
 	s.mux.HandleFunc("GET /v1/netpolicy/baseline", s.handleNetPolicyBaseline)
+	s.mux.HandleFunc("GET /v1/jail", s.handleGetJail)
+	s.mux.HandleFunc("PUT /v1/jail/mode", s.handleSetJailMode)
+	s.mux.HandleFunc("POST /v1/jail/plan", s.handlePlanJail)
+	s.mux.HandleFunc("POST /v1/jail/audit", s.handleJailAudit)
+	s.mux.HandleFunc("GET /v1/jail/baseline", s.handleJailBaseline)
+	s.mux.HandleFunc("POST /v1/jail/reconcile", s.handleJailReconcile)
+	s.mux.HandleFunc("GET /v1/hibernate", s.handleGetHibernate)
+	s.mux.HandleFunc("PUT /v1/hibernate/mode", s.handleSetHibernateMode)
+	s.mux.HandleFunc("POST /v1/hibernate/plan", s.handleHibernatePlan)
 }
 
 // Start begins listening on the unix socket.
@@ -242,6 +252,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"seccomp_auditor":       true,
 			"virtiofs_dax_pool":     true,
 			"netpolicy_firewall":    true,
+			"vmm_jail":              true,
+			"daemonless_reattach":   true,
+			"memory_hibernation":    true,
 			"network_backend":       caps.NetworkBackend,
 		},
 		Instances: counts,

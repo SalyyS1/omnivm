@@ -76,6 +76,10 @@ func main() {
 		cmdVirtioFS()
 	case "netpolicy":
 		cmdNetPolicy()
+	case "jail":
+		cmdJail()
+	case "hibernate":
+		cmdHibernate()
 	case "doctor":
 		cmdDoctor()
 	case "instance":
@@ -115,6 +119,8 @@ Commands:
   seccomp    Audit or generate Linux seccomp-bpf syscall profiles (--sarif supported)
   virtiofs   Manage shared Virtio-FS / Virtio-PMEM DAX rootfs cache pool
   netpolicy  Audit, compile (nftables), or enforce per-tenant egress CIDR/DNS policies
+  jail       Plan, audit (SARIF), or reconcile unprivileged VMM jails and survival leases
+  hibernate  Manage sparse memory snapshot hibernation, clock sync, and virtio-rng reseeding
   doctor     Print platform and backend info
   instance   Manage instances (start, branch, list, info, disable, delete, pause, resume, prune)
   snapshot   Manage Copy-on-Write microVM snapshots and branches (create, list, info, branch, delete)

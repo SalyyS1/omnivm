@@ -9,7 +9,7 @@ Hardware-isolated, scale-to-zero Linux microVMs for AI sandboxes, ephemeral tool
 
 OmniVM runs each workload inside a dedicated [Cloud Hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) microVM backed by Linux KVM and its own guest kernel. Any standard OCI container image (`python:3.12-alpine`, `node:22-alpine`, `ubuntu:24.04`, or custom registries) is unpacked and formatted into an isolated `ext4` root block device. Idle microVMs automatically freeze vCPUs (`PAUSED`) and later scale down to zero host memory (`STOPPED`), while keeping host ingress ports bound so the next HTTP request, TCP connection, `exec` call, or agent tether frame transparently wakes the instance.
 
-> **Status: pre-alpha.** OmniVM builds upon [AegisVM](https://github.com/xfeldman/aegisvm) and is actively hardened toward multi-tenant Linux deployments. Unprivileged VMM jail sandboxing and daemonless VM re-attachment are tracked on the [roadmap](#roadmap); review your host isolation posture before exposing untrusted multi-tenant workloads on shared production hosts. Benchmark claims are published together with reproducible scripts in [docs/benchmarks.md](docs/benchmarks.md).
+> **Release: v1.0.0.** OmniVM builds upon [AegisVM](https://github.com/xfeldman/aegisvm) with unprivileged subordinate UID/GID VMM jails (`OVM-JAIL-001..008`), daemonless survival leases across `ovmd` upgrades, sparse zero-page memory hibernation with guest clock resynchronization and `virtio-rng` entropy reseeding, Copy-on-Write branching, Virtio-FS/PMEM DAX pooling, and per-tenant egress CIDR/DNS firewalling. Benchmark claims are published together with reproducible scripts in [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Architecture
 
@@ -305,6 +305,26 @@ ovm netpolicy compile policy.json --tap ovm0 --guest-ip 172.16.0.2
 ovm netpolicy eval policy.json --dst 169.254.169.254 --proto tcp --port 80
 ```
 
+## Unprivileged VMM Jails, Daemonless Survival, and Memory Hibernation (`v1.0.0`)
+
+OmniVM `v1.0.0` completes the multi-tenant host isolation and hibernation architecture across `internal/vmmjail` and `internal/hibernate`:
+
+- **Unprivileged Cloud Hypervisor VMM Jailer (`internal/vmmjail`)**: Allocates collision-free subordinate UID/GID pairs (`100000..165535`) per microVM (`OVM_JAIL_MODE=off|audit|strict`), confines each VMM inside an isolated chroot directory, clears the Linux capability bounding set (`CapBnd=0`, `PR_SET_NO_NEW_PRIVS=1`), enforces `RLIMIT_AS` (`MemoryMB + 256 MiB`), `RLIMIT_NOFILE`, and `RLIMIT_NPROC`, and hands off pre-opened `/dev/kvm` and TAP file descriptors. Includes a static security auditor (`OVM-JAIL-001` through `OVM-JAIL-008`) with CVSS v3.1 ratings and OASIS SARIF v2.1.0 output (`ovm jail audit --sarif`).
+- **Daemonless VM Survival Leases (`vmmjail.ReconcileLeases`)**: Persists SHA-256 integrity-verified survival leases recording VMM PID and `/proc/<pid>/stat` start-time ticks (`ProcStartTicks`). Across `ovmd` upgrades, `ReconcileLeases` re-attaches live microVMs while preventing signals against recycled host PIDs (`stale_pid_reused`) and sweeping dead sockets (`orphaned_cleaned`).
+- **Sparse Zero-Page Memory Hibernation and Cryptographic Restore (`internal/hibernate`)**: Scans 4 KiB guest RAM frames (`OVMHIB01` stream), eliding zero pages with fail-closed SHA-256 verification on restore (`OVM_HIBERNATE_MODE=off|idle|aggressive`). Before releasing traffic to a restored VM, `BuildRestorePlan` synthesizes `clock.sync` (`step` vs `slew` adjustment) and a 512-bit CSPRNG `rng.reseed` + RFC 4122 `vm_gen_id` rotation so cloned or restored guests never reuse PRNG state or TLS nonces. Exposed via CLI, REST (`/v1/jail*`, `/v1/hibernate*`, `/v1/bench/hibernate`), Prometheus (`omnivm_jail_*`, `omnivm_hibernate_*`), and `ovm-mcp` (`jail_audit`, `jail_status`, `hibernate_plan`, 25 MCP tools total).
+
+```bash
+# Plan, audit (SARIF v2.1.0), and reconcile unprivileged VMM jails and survival leases
+ovm jail generate --instance agent-vm --tenant acme --out jail.json
+ovm jail audit jail.json --sarif jail.sarif --strict
+ovm jail rules
+ovm jail reconcile
+
+# Benchmark 4 KiB zero-page memory hibernation and inspect post-restore RNG/clock plans
+ovm bench hibernate --memory-mb 64 --zero-ratio 0.75
+ovm hibernate plan --instance agent-vm --hibernated-ms 600000
+```
+
 ## Testing
 
 Unit, configuration validation, router readiness-probe, HTTP API, and race-detector concurrency suites run on standard Linux runners without requiring `/dev/kvm`:
@@ -332,13 +352,13 @@ sudo make integration
 - [Benchmarks Methodology](docs/benchmarks.md)
 - [Development Environment](docs/development-environment.md)
 
-## Roadmap
+## Completed v1.0 Architecture Milestones
 
 1. **Reproducible Benchmarks and Config Hardening**: Automated KVM benchmarks, rootfs image-layer sizing, and strict daemon configuration validation.
-2. **Multi-Tenant Network Isolation**: `nftables` rule sets replacing shell `iptables`, `/30` subnet pooling, anti-spoofing filters, and VM-to-VM deny policies.
-3. **Resource Quotas and CoW Storage**: `reflink` / `dm-thin` copy-on-write instance disks, per-VM cgroup v2 CPU/memory limits, and block I/O throttling.
-4. **Daemonless VM Survival**: Unprivileged Cloud Hypervisor jails and live state re-attachment across `ovmd` upgrades.
-5. **Disk Snapshots on Idle**: Memory snapshot-to-disk hibernation with guest clock resynchronization and virtio-rng entropy reseeding on restore.
+2. **Multi-Tenant Network Isolation**: `nftables` rule sets (`internal/netpolicy`), `/30` subnet pooling, anti-spoofing filters, and VM-to-VM / IMDS deny policies.
+3. **Resource Quotas and CoW Storage**: `FICLONE` reflink and sparse extent cloning, per-VM cgroup v2 watermarks, Virtio-FS/PMEM DAX pooling, and token-bucket I/O QoS.
+4. **Daemonless VM Survival**: Unprivileged Cloud Hypervisor VMM jails (`internal/vmmjail`) and PID start-tick verified live re-attachment across `ovmd` upgrades.
+5. **Disk Snapshots on Idle**: Sparse zero-page memory hibernation (`internal/hibernate`) with guest clock resynchronization and 512-bit `virtio-rng` entropy reseeding on restore.
 
 ## Attribution and License
 

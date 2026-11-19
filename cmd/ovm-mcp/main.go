@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/SalyyS1/omnivm/internal/blob"
+	"github.com/SalyyS1/omnivm/internal/hibernate"
 	"github.com/SalyyS1/omnivm/internal/netpolicy"
 	"github.com/SalyyS1/omnivm/internal/version"
+	"github.com/SalyyS1/omnivm/internal/vmmjail"
 )
 
 // --- JSON-RPC types ---
@@ -443,6 +445,37 @@ var tools = []mcpTool{
 		InputSchema: rawJSON(`{
 			"type": "object",
 			"properties": {}
+		}`),
+	},
+	{
+		Name:        "jail_audit",
+		Description: "Statically audit one or more unprivileged Cloud Hypervisor VMM JailSpec JSON envelopes against OVM-JAIL-001..008 (UID/GID privilege, chroot boundary, Linux capabilities, RLIMIT ceilings, cross-VM UID collisions, seccomp/netns, FD handoff, bind mounts) with optional OASIS SARIF v2.1.0 output.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"spec":   {"type": "object", "description": "Single JailSpec JSON object to audit"},
+				"format": {"type": "string", "enum": ["json", "sarif"], "description": "Output format (json or sarif)"}
+			},
+			"required": ["spec"]
+		}`),
+	},
+	{
+		Name:        "jail_status",
+		Description: "Inspect unprivileged VMM subordinate UID/GID pool status, active microVM jails, and daemonless survival lease reconciliation counters.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {}
+		}`),
+	},
+	{
+		Name:        "hibernate_plan",
+		Description: "Synthesize a post-hibernation guest wall-clock resynchronization and 512-bit CSPRNG virtio-rng entropy reseed + VMGenID rotation RPC plan.",
+		InputSchema: rawJSON(`{
+			"type": "object",
+			"properties": {
+				"instance":      {"type": "string", "description": "Instance handle or ID"},
+				"hibernated_ms": {"type": "integer", "description": "Elapsed hibernation duration in milliseconds (default 300000)"}
+			}
 		}`),
 	},
 }
@@ -1101,6 +1134,9 @@ var toolHandlers = map[string]func(json.RawMessage) *mcpToolResult{
 	"netpolicy_audit":   handleNetPolicyAuditMCP,
 	"netpolicy_compile": handleNetPolicyCompileMCP,
 	"virtiofs_status":   handleVirtioFSStatusMCP,
+	"jail_audit":        handleJailAuditMCP,
+	"jail_status":       handleJailStatusMCP,
+	"hibernate_plan":    handleHibernatePlanMCP,
 }
 
 func handleSnapshotCreate(args json.RawMessage) *mcpToolResult {
@@ -1276,6 +1312,61 @@ func handleVirtioFSStatusMCP(_ json.RawMessage) *mcpToolResult {
 		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
 	}
 	return textResult(string(data))
+}
+
+func handleJailAuditMCP(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Spec   json.RawMessage `json:"spec"`
+		Format string          `json:"format"`
+	}
+	if err := json.Unmarshal(args, &params); err != nil || len(params.Spec) == 0 {
+		return errorResult("spec object is required")
+	}
+	rep, err := vmmjail.AuditJailBytes(params.Spec, "mcp.jail.json")
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if strings.EqualFold(strings.TrimSpace(params.Format), "sarif") {
+		sarifOut, _ := json.MarshalIndent(vmmjail.ToSARIF(rep, version.Version()), "", "  ")
+		return textResult(string(sarifOut))
+	}
+	out, _ := json.MarshalIndent(rep, "", "  ")
+	return textResult(string(out))
+}
+
+func handleJailStatusMCP(_ json.RawMessage) *mcpToolResult {
+	status, data, err := doRequest("GET", "/v1/jail", nil)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if status >= 400 {
+		return errorResult(fmt.Sprintf("HTTP %d: %s", status, string(data)))
+	}
+	return textResult(string(data))
+}
+
+func handleHibernatePlanMCP(args json.RawMessage) *mcpToolResult {
+	var params struct {
+		Instance     string `json:"instance"`
+		HibernatedMs int64  `json:"hibernated_ms"`
+	}
+	if len(args) > 0 {
+		_ = json.Unmarshal(args, &params)
+	}
+	if strings.TrimSpace(params.Instance) == "" {
+		params.Instance = "hibernated-vm"
+	}
+	if params.HibernatedMs <= 0 {
+		params.HibernatedMs = 300000
+	}
+	eng := hibernate.NewEngine(hibernate.Config{Mode: hibernate.ModeIdle})
+	now := time.Now().UTC()
+	plan, err := eng.BuildRestorePlan(params.Instance, now.Add(-time.Duration(params.HibernatedMs)*time.Millisecond), now)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	out, _ := json.MarshalIndent(plan, "", "  ")
+	return textResult(string(out))
 }
 
 // --- Main loop ---

@@ -29,6 +29,7 @@ import (
 	"github.com/SalyyS1/omnivm/internal/cgroup"
 	"github.com/SalyyS1/omnivm/internal/config"
 	"github.com/SalyyS1/omnivm/internal/diskwarm"
+	"github.com/SalyyS1/omnivm/internal/hibernate"
 	"github.com/SalyyS1/omnivm/internal/image"
 	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/ksm"
@@ -41,6 +42,7 @@ import (
 	"github.com/SalyyS1/omnivm/internal/tether"
 	"github.com/SalyyS1/omnivm/internal/virtiofs"
 	"github.com/SalyyS1/omnivm/internal/vmm"
+	"github.com/SalyyS1/omnivm/internal/vmmjail"
 )
 
 // ErrInstanceStopped is returned when exec is attempted on a stopped instance.
@@ -338,6 +340,8 @@ type LifecycleMetrics struct {
 	IOQoS             ioqos.Metrics      `json:"io_qos"`
 	VirtioFS          virtiofs.Metrics   `json:"virtiofs"`
 	NetPolicy         netpolicy.Metrics  `json:"net_policy"`
+	Jail              vmmjail.Metrics    `json:"jail"`
+	Hibernate         hibernate.Metrics  `json:"hibernate"`
 	WakeLatency       WakeLatencyMetrics `json:"wake_latency"`
 }
 
@@ -412,6 +416,8 @@ type Manager struct {
 	ioqosGov     *ioqos.Governor
 	virtiofsPool *virtiofs.Pool
 	netFirewall  *netpolicy.Firewall
+	jailMgr      *vmmjail.Manager
+	hibernateEng *hibernate.Engine
 
 	coldBootHist      *telemetry.Histogram
 	warmResumeHist    *telemetry.Histogram
@@ -436,6 +442,9 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 	ioqosMode := ioqos.ModeOff
 	vfsMode := virtiofs.ModeOff
 	netPolMode := netpolicy.ModeOff
+	jailMode := vmmjail.ModeOff
+	hibMode := hibernate.ModeOff
+	var jailRoot, leaseDir string
 	var cgroupRatio float64
 	var diskWarmBudget uint64
 	var vfsWinBytes, vfsPoolBytes, vfsCacheBytes uint64
@@ -479,6 +488,16 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		if cfg.NetPolicyMode != "" {
 			netPolMode = cfg.NetPolicyMode
 		}
+		if cfg.JailMode != "" {
+			jailMode = cfg.JailMode
+		}
+		if cfg.HibernateMode != "" {
+			hibMode = cfg.HibernateMode
+		}
+		if cfg.DataDir != "" {
+			jailRoot = filepath.Join(cfg.DataDir, "jails")
+			leaseDir = filepath.Join(cfg.DataDir, "leases")
+		}
 	}
 	return &Manager{
 		instances:         make(map[string]*Instance),
@@ -494,6 +513,8 @@ func NewManager(v vmm.VMM, cfg *config.Config, ls *logstore.Store, imgCache *ima
 		ioqosGov:          ioqos.NewGovernor(ioqos.Config{Mode: ioqosMode, DefaultPolicy: defTenantPol}),
 		virtiofsPool:      virtiofs.NewPool(virtiofs.Config{Mode: vfsMode, DefaultWindowBytes: vfsWinBytes, MaxPoolBytes: vfsPoolBytes, MaxCacheBytes: vfsCacheBytes}),
 		netFirewall:       netpolicy.NewFirewall(netPolMode),
+		jailMgr:           vmmjail.NewManager(vmmjail.Config{Mode: jailMode, RootDir: jailRoot, LeaseDir: leaseDir}),
+		hibernateEng:      hibernate.NewEngine(hibernate.Config{Mode: hibMode}),
 		coldBootHist:      telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		warmResumeHist:    telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
 		coalescedWaitHist: telemetry.NewHistogram(telemetry.DefaultWakeBuckets),
@@ -605,6 +626,34 @@ func (m *Manager) NetPolicyFirewall() *netpolicy.Firewall {
 	return m.netFirewall
 }
 
+// SetJailManager overrides the unprivileged VMM jail manager.
+func (m *Manager) SetJailManager(jm *vmmjail.Manager) {
+	m.mu.Lock()
+	m.jailMgr = jm
+	m.mu.Unlock()
+}
+
+// JailManager returns the active unprivileged VMM jail manager.
+func (m *Manager) JailManager() *vmmjail.Manager {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.jailMgr
+}
+
+// SetHibernateEngine overrides the memory hibernation engine.
+func (m *Manager) SetHibernateEngine(eng *hibernate.Engine) {
+	m.mu.Lock()
+	m.hibernateEng = eng
+	m.mu.Unlock()
+}
+
+// HibernateEngine returns the active memory hibernation engine.
+func (m *Manager) HibernateEngine() *hibernate.Engine {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hibernateEng
+}
+
 // InstanceCounts returns a race-free breakdown of instances by state.
 func (m *Manager) InstanceCounts() InstanceStateCounts {
 	list := m.ListInstances()
@@ -658,6 +707,14 @@ func (m *Manager) Metrics() LifecycleMetrics {
 	if nf := m.NetPolicyFirewall(); nf != nil {
 		netPolMetrics = nf.Metrics()
 	}
+	var jailMetrics vmmjail.Metrics
+	if jm := m.JailManager(); jm != nil {
+		jailMetrics = jm.Metrics()
+	}
+	var hibMetrics hibernate.Metrics
+	if he := m.HibernateEngine(); he != nil {
+		hibMetrics = he.Metrics()
+	}
 	var wakeLatency WakeLatencyMetrics
 	if m.coldBootHist != nil {
 		wakeLatency.ColdBoot = m.coldBootHist.Snapshot()
@@ -687,6 +744,8 @@ func (m *Manager) Metrics() LifecycleMetrics {
 		IOQoS:             qosMetrics,
 		VirtioFS:          vfsMetrics,
 		NetPolicy:         netPolMetrics,
+		Jail:              jailMetrics,
+		Hibernate:         hibMetrics,
 		WakeLatency:       wakeLatency,
 	}
 }
@@ -2826,8 +2885,20 @@ func (m *Manager) notifyStateChange(id, state string) {
 	}
 	m.reconcileIOQoS(inst, id, state)
 	m.reconcileVirtioFS(inst, id, state)
+	m.reconcileJail(inst, id, state)
 	m.reconcileKSM()
 	m.reconcileCgroup()
+}
+
+func (m *Manager) reconcileJail(inst *Instance, id, state string) {
+	jm := m.JailManager()
+	if jm == nil {
+		return
+	}
+	if inst == nil || state == StateStopped {
+		jm.ReleaseJail(id)
+		_ = jm.RemoveLease(id)
+	}
 }
 
 func (m *Manager) reconcileVirtioFS(inst *Instance, id, state string) {

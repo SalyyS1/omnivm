@@ -165,6 +165,14 @@ type Config struct {
 	// "off" (default), "audit" (log/count policy denials without blocking), or "enforce".
 	// Set via OVM_NET_POLICY_MODE.
 	NetPolicyMode string
+
+	// JailMode controls the unprivileged Cloud Hypervisor VMM jailer and daemonless survival leases:
+	// "off" (default), "audit", or "strict". Set via OVM_JAIL_MODE.
+	JailMode string
+
+	// HibernateMode controls memory snapshot-to-disk sparse compaction and entropy reseeding:
+	// "off" (default), "idle", or "aggressive". Set via OVM_HIBERNATE_MODE.
+	HibernateMode string
 }
 
 // DefaultConfig returns the default configuration.
@@ -205,6 +213,14 @@ func DefaultConfig() *Config {
 	netPolMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_NET_POLICY_MODE")))
 	if netPolMode == "" {
 		netPolMode = "off"
+	}
+	jailMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_JAIL_MODE")))
+	if jailMode == "" {
+		jailMode = "off"
+	}
+	hibernateMode := strings.ToLower(strings.TrimSpace(os.Getenv("OVM_HIBERNATE_MODE")))
+	if hibernateMode == "" {
+		hibernateMode = "off"
 	}
 
 	return &Config{
@@ -247,6 +263,8 @@ func DefaultConfig() *Config {
 		VirtioFSMaxPoolMB:     parseOptionalEnvInt("OVM_DAX_POOL_MB"),
 		VirtioFSCacheMB:       parseOptionalEnvInt("OVM_VIRTIOFS_CACHE_MB"),
 		NetPolicyMode:         netPolMode,
+		JailMode:              jailMode,
+		HibernateMode:         hibernateMode,
 	}
 }
 
@@ -395,6 +413,16 @@ func (c *Config) Validate() error {
 	case "", "off", "audit", "enforce":
 	default:
 		return fmt.Errorf("unsupported net_policy_mode %q: expected off, audit, or enforce", c.NetPolicyMode)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.JailMode)) {
+	case "", "off", "audit", "strict":
+	default:
+		return fmt.Errorf("unsupported jail_mode %q: expected off, audit, or strict", c.JailMode)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.HibernateMode)) {
+	case "", "off", "idle", "aggressive":
+	default:
+		return fmt.Errorf("unsupported hibernate_mode %q: expected off, idle, or aggressive", c.HibernateMode)
 	}
 	if c.DNSServer != "" {
 		if ip := net.ParseIP(c.DNSServer); ip == nil || ip.To4() == nil {

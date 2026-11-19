@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/SalyyS1/omnivm/internal/hibernate"
 	"github.com/SalyyS1/omnivm/internal/ioqos"
 	"github.com/SalyyS1/omnivm/internal/prefault"
 	"github.com/SalyyS1/omnivm/internal/virtiofs"
@@ -26,6 +27,8 @@ func cmdBench() {
 		cmdBenchIOQoS(os.Args[3:])
 	case "virtiofs":
 		cmdBenchVirtioFS(os.Args[3:])
+	case "hibernate":
+		cmdBenchHibernate(os.Args[3:])
 	case "help", "--help", "-h":
 		benchUsage()
 	default:
@@ -355,4 +358,48 @@ func cmdBenchVirtioFS(args []string) {
 	fmt.Printf("  gains:                %.2fx throughput  %.2fx RAM reduction (saved %d MiB, %d pool hits)\n",
 		rep.ThroughputSpeedup, rep.MemoryReductionRatio,
 		rep.MemorySavedBytes/(1024*1024), rep.PoolCacheHits)
+}
+
+func cmdBenchHibernate(args []string) {
+	var cfg hibernate.BenchmarkConfig
+	jsonOut := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--memory-mb":
+			if i+1 < len(args) {
+				if v, err := strconv.Atoi(args[i+1]); err == nil {
+					cfg.MemoryMB = v
+				}
+				i++
+			}
+		case "--zero-ratio":
+			if i+1 < len(args) {
+				if v, err := strconv.ParseFloat(args[i+1], 64); err == nil {
+					cfg.ZeroPageRatio = v
+				}
+				i++
+			}
+		case "--json", "-j":
+			jsonOut = true
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rep, err := hibernate.RunBenchmark(ctx, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bench hibernate: %v\n", err)
+		os.Exit(1)
+	}
+	if jsonOut {
+		out, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
+	fmt.Printf("OmniVM Memory Hibernation Sparse Compaction Benchmark\n")
+	fmt.Printf("  image:     %d MiB (zero_ratio=%.2f, zero_pages=%d, dirty_pages=%d)\n",
+		rep.MemoryMB, rep.ZeroPageRatio, rep.ZeroPages, rep.DirtyPages)
+	fmt.Printf("  savings:   %.2fx compression (%d KiB stored, %d KiB elided)\n",
+		rep.CompressionRatio, rep.StoredBytes/1024, rep.SavedBytes/1024)
+	fmt.Printf("  speed:     compact=%.1f MiB/s (%.2f ms)  restore+sha256=%.1f MiB/s (%.2f ms)  verified=%v\n",
+		rep.CompactMBps, rep.CompactDurationMs, rep.RestoreMBps, rep.RestoreDurationMs, rep.IntegrityVerified)
 }
